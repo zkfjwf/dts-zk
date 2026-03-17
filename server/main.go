@@ -3,6 +3,8 @@ package main
 import (
 	// module name is travel
 	// use other package within the module
+	"fmt"
+	"travel/internal/config"
 	"travel/internal/http"
 	"travel/internal/ws"
 
@@ -13,6 +15,9 @@ import (
 )
 
 func main() {
+	config.InitConfig()
+	addr := fmt.Sprintf(":%d", config.GlobalConfig.Port)
+
 	r := gin.Default()
 
 	// 为了解决本地开发的CORS问题
@@ -28,5 +33,5 @@ func main() {
 	r.GET("/hello", http.HttpHello)
 	r.GET("/ws", ws.WsHello)
 	
-	r.Run(":8088")
+	r.Run(addr)
 }
