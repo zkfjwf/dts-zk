@@ -4,8 +4,8 @@ export default function TabLayout() {
   return (
     <Tabs>
       <Tabs.Screen name="index" options={{ title: "Home" }} />
-      <Tabs.Screen name="test" options={{ title: "Test Network" }} />
-      <Tabs.Screen name="test2" options={{ title: "Test DB" }} />
+      <Tabs.Screen name="network" options={{ title: "Test Network" }} />
+      <Tabs.Screen name="db" options={{ title: "Test DB" }} />
     </Tabs>
   );
 }
