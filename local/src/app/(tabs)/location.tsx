@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from "react-native";
-import MapView, { Marker, UrlTile, type Region } from "react-native-maps";
+import { WebView } from "react-native-webview";
 import {
   getCurrentUser,
   getSpaceByCode,
@@ -18,13 +18,82 @@ import {
 
 type LocationItem = SpaceData["locations"][number];
 
-function buildMapRegion(center: LocationItem): Region {
-  return {
-    latitude: center.latitude,
-    longitude: center.longitude,
-    latitudeDelta: 0.08,
-    longitudeDelta: 0.08,
-  };
+function buildMapHtml(
+  ak: string,
+  center: LocationItem,
+  locations: LocationItem[],
+  currentUserId: string,
+) {
+  const payload = JSON.stringify(
+    locations.map((item) => ({
+      id: item.id,
+      userId: item.user_id,
+      name: item.username,
+      lat: item.latitude,
+      lng: item.longitude,
+    })),
+  );
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <style>
+      html, body, #map { margin:0; width:100%; height:100%; background:#f2f6fc; }
+      .tag { position:absolute; left:10px; top:10px; z-index:2; background:rgba(255,255,255,.92); border-radius:8px; padding:6px 8px; font-size:12px; color:#20324d; }
+    </style>
+    <script src="https://api.map.baidu.com/api?v=3.0&ak=${ak}"></script>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div class="tag">团队实时位置</div>
+    <script>
+      (function () {
+        var pointsData = ${payload};
+        var map = new BMap.Map("map");
+        var centerPoint = new BMap.Point(${center.longitude}, ${center.latitude});
+        map.centerAndZoom(centerPoint, 13);
+        map.enableScrollWheelZoom(true);
+        map.enablePinchToZoom();
+        map.enableKeyboard();
+
+        var points = [];
+        for (var i = 0; i < pointsData.length; i++) {
+          var p = pointsData[i];
+          var point = new BMap.Point(p.lng, p.lat);
+          points.push(point);
+
+          var marker = new BMap.Marker(point);
+          if (p.userId === "${currentUserId}") {
+            marker.setAnimation(BMAP_ANIMATION_BOUNCE);
+          }
+          map.addOverlay(marker);
+
+          var title = p.name + (p.userId === "${currentUserId}" ? "（我）" : "");
+          var label = new BMap.Label(title, {
+            position: point,
+            offset: new BMap.Size(14, -20),
+          });
+          label.setStyle({
+            border: "1px solid #8fb0e6",
+            borderRadius: "8px",
+            padding: "2px 6px",
+            color: "#1f2d44",
+            backgroundColor: "#ffffff",
+            fontSize: "12px",
+            lineHeight: "18px",
+          });
+          map.addOverlay(label);
+        }
+
+        if (points.length > 1) {
+          map.setViewport(points, { margins: [40, 30, 40, 30] });
+        }
+      })();
+    </script>
+  </body>
+</html>`;
 }
 
 export default function LocationPage() {
@@ -67,17 +136,24 @@ export default function LocationPage() {
     );
   }, [space, me.id]);
 
-  const region = useMemo(
-    () => (centerMember ? buildMapRegion(centerMember) : null),
-    [centerMember],
-  );
-
-  const tileUrl = useMemo(() => {
-    if (!baiduAk) {
+  const html = useMemo(() => {
+    if (!space || !centerMember || !baiduAk) {
       return "";
     }
-    return `https://api.map.baidu.com/customimage/tile?x={x}&y={y}&z={z}&scale=2&ak=${baiduAk}&customid=normal`;
-  }, [baiduAk]);
+    return buildMapHtml(baiduAk, centerMember, space.locations, me.id);
+  }, [space, centerMember, baiduAk, me.id]);
+
+  const webKey = useMemo(() => {
+    if (!space) {
+      return "none";
+    }
+    return `${space.id}:${space.locations
+      .map(
+        (item) =>
+          `${item.id}-${item.latitude.toFixed(6)}-${item.longitude.toFixed(6)}`,
+      )
+      .join("|")}`;
+  }, [space]);
 
   if (!space) {
     return (
@@ -99,7 +175,7 @@ export default function LocationPage() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>团队地图</Text>
+          <Text style={styles.title}>团队真实地图（百度）</Text>
           <Pressable
             style={styles.exitButton}
             onPress={() =>
@@ -112,34 +188,27 @@ export default function LocationPage() {
 
         {!baiduAk ? (
           <View style={styles.noticeCard}>
-            <Text style={styles.noticeTitle}>提示</Text>
+            <Text style={styles.noticeTitle}>缺少 AK</Text>
             <Text style={styles.noticeText}>
-              未配置百度 AK，将使用默认地图底图。可在 .env 设置
-              EXPO_PUBLIC_BAIDU_MAP_AK。
+              请在 .env 中配置 EXPO_PUBLIC_BAIDU_MAP_AK 后重启应用。
             </Text>
           </View>
         ) : null}
 
         <View style={styles.mapCard}>
-          {region ? (
-            <MapView style={styles.map} initialRegion={region} region={region}>
-              {tileUrl ? <UrlTile urlTemplate={tileUrl} zIndex={-1} /> : null}
-              {space.locations.map((member) => (
-                <Marker
-                  key={member.id}
-                  coordinate={{
-                    latitude: member.latitude,
-                    longitude: member.longitude,
-                  }}
-                  title={member.username}
-                  description={member.user_id === me.id ? "我" : "队友"}
-                  pinColor={member.user_id === me.id ? "#0A69F5" : "#F5760A"}
-                />
-              ))}
-            </MapView>
+          {html ? (
+            <WebView
+              key={webKey}
+              source={{ html }}
+              style={styles.map}
+              originWhitelist={["*"]}
+              javaScriptEnabled
+              domStorageEnabled
+              setBuiltInZoomControls={false}
+            />
           ) : (
             <View style={styles.mapFallback}>
-              <Text style={styles.mapFallbackText}>暂无可显示的位置数据</Text>
+              <Text style={styles.mapFallbackText}>地图暂不可用</Text>
             </View>
           )}
         </View>
@@ -199,11 +268,12 @@ const styles = StyleSheet.create({
   },
   map: {
     width: "100%",
-    height: 280,
+    height: 300,
     borderRadius: 10,
+    backgroundColor: "#EDF3FB",
   },
   mapFallback: {
-    height: 280,
+    height: 300,
     borderRadius: 10,
     backgroundColor: "#EDF3FB",
     alignItems: "center",

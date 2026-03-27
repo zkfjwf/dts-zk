@@ -1,10 +1,12 @@
 import { Q } from "@nozbe/watermelondb";
+import * as FileSystem from "expo-file-system/legacy";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -17,8 +19,9 @@ import {
 import { database } from "@/model";
 import Photo from "@/model/Photo";
 import Post from "@/model/Post";
+import PostComment from "@/model/PostComment";
+import { syncMockSpaceToDatabase } from "./dbSync";
 import {
-  addCommentToPost,
   disbandSpaceByCode,
   getCurrentUser,
   getSpaceByCode,
@@ -26,7 +29,13 @@ import {
   type SpaceData,
 } from "./mockApp";
 
-type ImagePickerModule = typeof import("expo-image-picker");
+type ImagePickerModule = {
+  requestMediaLibraryPermissionsAsync: () => Promise<{ granted: boolean }>;
+  launchImageLibraryAsync: (options: Record<string, unknown>) => Promise<{
+    canceled: boolean;
+    assets: { uri: string }[];
+  }>;
+};
 
 type FeedPost = {
   id: string;
@@ -35,8 +44,7 @@ type FeedPost = {
   text: string;
   imageUris: string[];
   createdAt: number;
-  comments: { id: string; author: string; text: string }[];
-  source: "mock" | "db";
+  comments: { id: string; author: string; text: string; createdAt: number }[];
 };
 
 let imagePickerModuleCache: ImagePickerModule | null | undefined;
@@ -61,6 +69,49 @@ function formatTime(ts: number) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function isRemoteUri(uri: string) {
+  return /^https?:\/\//i.test(uri);
+}
+
+function getFileExt(uri: string) {
+  const clean = uri.split("?")[0].split("#")[0];
+  const match = clean.match(/\.([a-zA-Z0-9]{2,8})$/);
+  return match ? `.${match[1].toLowerCase()}` : ".jpg";
+}
+
+async function ensureDir(targetDir: string) {
+  const info = await FileSystem.getInfoAsync(targetDir);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
+  }
+}
+
+async function saveImageToLocalDir(uri: string, folderName: string) {
+  if (!FileSystem.documentDirectory) {
+    return uri;
+  }
+
+  const baseDir = FileSystem.documentDirectory.endsWith("/")
+    ? FileSystem.documentDirectory
+    : `${FileSystem.documentDirectory}/`;
+  const targetDir = `${baseDir}${folderName}`;
+  const targetPath = `${targetDir}/${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}${getFileExt(uri)}`;
+
+  try {
+    await ensureDir(targetDir);
+    if (isRemoteUri(uri) && FileSystem.downloadAsync) {
+      const downloaded = await FileSystem.downloadAsync(uri, targetPath);
+      return downloaded.uri || targetPath;
+    }
+    await FileSystem.copyAsync({ from: uri, to: targetPath });
+    return targetPath;
+  } catch {
+    return uri;
+  }
 }
 
 function Avatar({ uri, name }: { uri?: string; name: string }) {
@@ -94,48 +145,73 @@ export default function TeamPage() {
   );
   const [dbPosts, setDbPosts] = useState<FeedPost[]>([]);
   const [postText, setPostText] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
   const [selectedImageUris, setSelectedImageUris] = useState<string[]>([]);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>(
     {},
   );
   const [menuOpen, setMenuOpen] = useState(false);
+  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
+  const [savingPreview, setSavingPreview] = useState(false);
 
   const loadDbPosts = useCallback(async (spaceId: string) => {
     const postCollection = database.collections.get<Post>("posts");
     const photoCollection = database.collections.get<Photo>("photos");
+    const commentCollection =
+      database.collections.get<PostComment>("post_comments");
 
-    const posts = await postCollection
-      .query(Q.where("space_id", spaceId), Q.sortBy("created_at", Q.desc))
-      .fetch();
+    const [posts, photos, comments] = await Promise.all([
+      postCollection
+        .query(Q.where("space_id", spaceId), Q.sortBy("created_at", Q.desc))
+        .fetch(),
+      photoCollection.query(Q.where("space_id", spaceId)).fetch(),
+      commentCollection
+        .query(Q.where("space_id", spaceId), Q.sortBy("created_at", Q.asc))
+        .fetch(),
+    ]);
 
-    const photos = await photoCollection
-      .query(Q.where("space_id", spaceId))
-      .fetch();
     const photoMap = new Map<string, string[]>();
-
     photos.forEach((item) => {
       if (!item.postId) {
         return;
       }
       const list = photoMap.get(item.postId) ?? [];
       list.push(item.remoteUrl || item.localPath);
-      photoMap.set(item.postId, list);
+      photoMap.set(item.postId, Array.from(new Set(list)));
+    });
+
+    const commentMap = new Map<
+      string,
+      { id: string; author: string; text: string; createdAt: number }[]
+    >();
+    comments.forEach((item) => {
+      if (!item.postId) {
+        return;
+      }
+      const list = commentMap.get(item.postId) ?? [];
+      list.push({
+        id: item.id,
+        author: item.authorName || "成员",
+        text: item.textContent || "",
+        createdAt:
+          item.createdAt instanceof Date
+            ? item.createdAt.getTime()
+            : Date.now(),
+      });
+      commentMap.set(item.postId, list);
     });
 
     setDbPosts(
       posts.map((item) => ({
         id: item.id,
         uploaderId: item.uploaderId,
-        uploaderName: item.uploaderName || "Member",
+        uploaderName: item.uploaderName || "成员",
         text: item.textContent || "",
         imageUris: photoMap.get(item.id) ?? [],
         createdAt:
           item.createdAt instanceof Date
             ? item.createdAt.getTime()
             : Date.now(),
-        comments: [],
-        source: "db",
+        comments: commentMap.get(item.id) ?? [],
       })),
     );
   }, []);
@@ -150,11 +226,15 @@ export default function TeamPage() {
 
       const nextSpace = getSpaceByCode(spaceCode);
       setSpace(nextSpace);
-      if (nextSpace) {
-        void loadDbPosts(nextSpace.id);
-      } else {
+      if (!nextSpace) {
         setDbPosts([]);
+        return;
       }
+
+      void (async () => {
+        await syncMockSpaceToDatabase(nextSpace);
+        await loadDbPosts(nextSpace.id);
+      })();
     }, [spaceCode, loadDbPosts]),
   );
 
@@ -166,31 +246,12 @@ export default function TeamPage() {
     return map;
   }, [space]);
 
-  const feedPosts = useMemo(() => {
-    const mockPosts: FeedPost[] = (space?.posts ?? []).map((post) => ({
-      id: post.id,
-      uploaderId: post.uploader_id,
-      uploaderName: post.uploader_name,
-      text: post.text,
-      imageUris: post.image_uris,
-      createdAt: post.created_at,
-      comments: post.comments.map((comment) => ({
-        id: comment.id,
-        author: comment.author,
-        text: comment.text,
-      })),
-      source: "mock",
-    }));
-
-    return [...dbPosts, ...mockPosts].sort((a, b) => b.createdAt - a.createdAt);
-  }, [dbPosts, space]);
-
   const pickImagesFromAlbum = async () => {
     const imagePicker = getImagePickerModule();
     if (!imagePicker) {
       Alert.alert(
-        "Album unavailable",
-        "This build does not include image-picker native module. Rebuild Dev Client or use image URLs.",
+        "相册不可用",
+        "当前安装包未包含 image-picker 原生模块，请重建开发包。",
       );
       return;
     }
@@ -199,15 +260,15 @@ export default function TeamPage() {
       const permission =
         await imagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert("Permission denied", "Please allow media access first.");
+        Alert.alert("权限不足", "请先授权访问相册。");
         return;
       }
 
       const result = await imagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
         allowsMultipleSelection: true,
-        quality: 0.8,
-        selectionLimit: 6,
+        quality: 0.85,
+        selectionLimit: 9,
       });
 
       if (result.canceled) {
@@ -217,11 +278,9 @@ export default function TeamPage() {
       const uris = result.assets
         .map((asset: { uri: string }) => asset.uri)
         .filter(Boolean);
-      const merged = [...selectedImageUris, ...uris];
-      const unique = Array.from(new Set(merged));
-      setSelectedImageUris(unique);
+      setSelectedImageUris((prev) => Array.from(new Set([...prev, ...uris])));
     } catch (error) {
-      Alert.alert("Album error", `Open album failed: ${String(error)}`);
+      Alert.alert("相册异常", `打开失败：${String(error)}`);
     }
   };
 
@@ -235,19 +294,22 @@ export default function TeamPage() {
     }
 
     const cleanText = postText.trim();
-    const urlImages = imageUrl
-      .split(/\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const imageUris = Array.from(new Set([...urlImages, ...selectedImageUris]));
+    const mergedInputUris = Array.from(new Set(selectedImageUris));
 
-    if (!cleanText && imageUris.length === 0) {
-      Alert.alert(
-        "Publish failed",
-        "Please enter text or select at least one image.",
-      );
+    if (!cleanText && mergedInputUris.length === 0) {
+      Alert.alert("发布失败", "请填写文字或至少上传一张图片。");
       return;
     }
+
+    const preparedImages = await Promise.all(
+      mergedInputUris.map(async (uri) => {
+        const localPath = await saveImageToLocalDir(uri, "travel-post-images");
+        return {
+          localPath,
+          remoteUrl: isRemoteUri(uri) ? uri : "",
+        };
+      }),
+    );
 
     await database.write(async () => {
       const postCollection = database.collections.get<Post>("posts");
@@ -262,40 +324,58 @@ export default function TeamPage() {
         createdPostId = post.id;
       });
 
-      for (const uri of imageUris) {
+      for (const image of preparedImages) {
         await photoCollection.create((photo) => {
           photo.spaceId = space.id;
           photo.postId = createdPostId;
           photo.uploaderId = currentUser.id;
-          photo.localPath = uri;
-          photo.remoteUrl = uri;
+          photo.localPath = image.localPath;
+          photo.remoteUrl = image.remoteUrl;
         });
       }
     });
 
     await loadDbPosts(space.id);
     setPostText("");
-    setImageUrl("");
     setSelectedImageUris([]);
   };
 
-  const onComment = (postId: string) => {
-    if (!spaceCode) {
+  const onComment = async (postId: string) => {
+    if (!space) {
+      return;
+    }
+    const content = (commentInputs[postId] ?? "").trim();
+    if (!content) {
+      Alert.alert("评论失败", "请输入评论内容。");
       return;
     }
 
-    const result = addCommentToPost(
-      spaceCode,
-      postId,
-      commentInputs[postId] ?? "",
-    );
-    if (!result.ok) {
-      Alert.alert("Comment failed", result.message);
-      return;
-    }
+    await database.write(async () => {
+      const collection = database.collections.get<PostComment>("post_comments");
+      await collection.create((item) => {
+        item.spaceId = space.id;
+        item.postId = postId;
+        item.authorId = currentUser.id;
+        item.authorName = currentUser.username;
+        item.textContent = content;
+      });
+    });
 
-    setSpace(result.space);
     setCommentInputs((prev) => ({ ...prev, [postId]: "" }));
+    await loadDbPosts(space.id);
+  };
+
+  const onSavePreviewImage = async () => {
+    if (!previewImageUri) {
+      return;
+    }
+    setSavingPreview(true);
+    const localPath = await saveImageToLocalDir(
+      previewImageUri,
+      "travel-saved-images",
+    );
+    setSavingPreview(false);
+    Alert.alert("保存成功", `已保存到本地：${localPath}`);
   };
 
   const onLeave = () => {
@@ -306,11 +386,9 @@ export default function TeamPage() {
 
     const result = leaveSpaceByCode(spaceCode);
     if (!result.ok) {
-      Alert.alert("Leave failed", result.message);
+      Alert.alert("退出失败", result.message);
       return;
     }
-
-    Alert.alert("Left", result.message);
     router.replace("/");
   };
 
@@ -319,13 +397,11 @@ export default function TeamPage() {
     if (!spaceCode) {
       return;
     }
-
     const ok = disbandSpaceByCode(spaceCode);
     if (!ok) {
-      Alert.alert("Disband failed", "Space does not exist.");
+      Alert.alert("解散失败", "空间不存在。");
       return;
     }
-
     router.replace("/");
   };
 
@@ -333,9 +409,9 @@ export default function TeamPage() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.centerWrap}>
-          <Text style={styles.emptyTitle}>Space not found</Text>
+          <Text style={styles.emptyTitle}>空间不存在</Text>
           <Pressable style={styles.mainBtn} onPress={() => router.replace("/")}>
-            <Text style={styles.mainBtnText}>Back</Text>
+            <Text style={styles.mainBtnText}>返回</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -352,7 +428,7 @@ export default function TeamPage() {
           <View style={styles.header}>
             <View>
               <Text style={styles.title}>{space.name}</Text>
-              <Text style={styles.subTitle}>Code: {space.code}</Text>
+              <Text style={styles.subTitle}>空间口令：{space.code}</Text>
             </View>
             <Pressable
               style={styles.menuTrigger}
@@ -373,7 +449,7 @@ export default function TeamPage() {
                   })
                 }
               >
-                <Text style={styles.menuText}>Bookkeeping</Text>
+                <Text style={styles.menuText}>记账</Text>
               </Pressable>
               <Pressable
                 style={styles.menuItem}
@@ -384,13 +460,13 @@ export default function TeamPage() {
                   })
                 }
               >
-                <Text style={styles.menuText}>Location</Text>
+                <Text style={styles.menuText}>位置</Text>
               </Pressable>
               <Pressable style={styles.menuItem} onPress={onLeave}>
-                <Text style={styles.menuText}>Leave</Text>
+                <Text style={styles.menuText}>退出空间</Text>
               </Pressable>
               <Pressable style={styles.menuItem} onPress={onDisband}>
-                <Text style={styles.menuDangerText}>Disband</Text>
+                <Text style={styles.menuDangerText}>解散空间</Text>
               </Pressable>
             </View>
           ) : null}
@@ -400,9 +476,14 @@ export default function TeamPage() {
             contentContainerStyle={styles.feedContent}
             keyboardShouldPersistTaps="handled"
           >
-            {feedPosts.map((post) => {
-              const author = users.get(post.uploaderId);
+            {dbPosts.length === 0 ? (
+              <View style={styles.postCard}>
+                <Text style={styles.commentHint}>暂时还没有动态</Text>
+              </View>
+            ) : null}
 
+            {dbPosts.map((post) => {
+              const author = users.get(post.uploaderId);
               return (
                 <View key={post.id} style={styles.postCard}>
                   <View style={styles.postHeader}>
@@ -425,61 +506,52 @@ export default function TeamPage() {
                       showsHorizontalScrollIndicator={false}
                     >
                       {post.imageUris.map((uri, idx) => (
-                        <Image
+                        <Pressable
                           key={`${post.id}-${idx}-${uri}`}
-                          source={{ uri }}
-                          style={styles.postImage}
-                        />
+                          onPress={() => setPreviewImageUri(uri)}
+                        >
+                          <Image source={{ uri }} style={styles.postImage} />
+                        </Pressable>
                       ))}
                     </ScrollView>
                   ) : null}
 
-                  {post.source === "mock" ? (
-                    <>
-                      <View style={styles.commentList}>
-                        {post.comments.length === 0 ? (
-                          <Text style={styles.commentHint}>No comments</Text>
-                        ) : (
-                          post.comments.map((comment) => (
-                            <View key={comment.id} style={styles.commentItem}>
-                              <Text style={styles.commentAuthor}>
-                                {comment.author}
-                              </Text>
-                              <Text style={styles.commentText}>
-                                {comment.text}
-                              </Text>
-                            </View>
-                          ))
-                        )}
-                      </View>
+                  <View style={styles.commentList}>
+                    {post.comments.length === 0 ? (
+                      <Text style={styles.commentHint}>暂无评论</Text>
+                    ) : (
+                      post.comments.map((comment) => (
+                        <View key={comment.id} style={styles.commentItem}>
+                          <Text style={styles.commentAuthor}>
+                            {comment.author}
+                          </Text>
+                          <Text style={styles.commentText}>{comment.text}</Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
 
-                      <View style={styles.commentRow}>
-                        <TextInput
-                          style={styles.commentInput}
-                          placeholder="Write comment"
-                          value={commentInputs[post.id] ?? ""}
-                          onChangeText={(text) =>
-                            setCommentInputs((prev) => ({
-                              ...prev,
-                              [post.id]: text,
-                            }))
-                          }
-                          multiline
-                          textAlignVertical="top"
-                        />
-                        <Pressable
-                          style={styles.commentBtn}
-                          onPress={() => onComment(post.id)}
-                        >
-                          <Text style={styles.commentBtnText}>Send</Text>
-                        </Pressable>
-                      </View>
-                    </>
-                  ) : (
-                    <Text style={styles.commentHint}>
-                      DB posts do not support comments yet.
-                    </Text>
-                  )}
+                  <View style={styles.commentRow}>
+                    <TextInput
+                      style={styles.commentInput}
+                      placeholder="写评论"
+                      value={commentInputs[post.id] ?? ""}
+                      onChangeText={(text) =>
+                        setCommentInputs((prev) => ({
+                          ...prev,
+                          [post.id]: text,
+                        }))
+                      }
+                      multiline
+                      textAlignVertical="top"
+                    />
+                    <Pressable
+                      style={styles.commentBtn}
+                      onPress={() => void onComment(post.id)}
+                    >
+                      <Text style={styles.commentBtnText}>发送</Text>
+                    </Pressable>
+                  </View>
                 </View>
               );
             })}
@@ -488,17 +560,9 @@ export default function TeamPage() {
           <View style={styles.composer}>
             <TextInput
               style={styles.input}
-              placeholder="Post text"
+              placeholder="动态文字（可不填）"
               value={postText}
               onChangeText={setPostText}
-              multiline
-              textAlignVertical="top"
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Image URLs (comma or newline separated)"
-              value={imageUrl}
-              onChangeText={setImageUrl}
               multiline
               textAlignVertical="top"
             />
@@ -507,37 +571,70 @@ export default function TeamPage() {
               style={styles.pickImageBtn}
               onPress={() => void pickImagesFromAlbum()}
             >
-              <Text style={styles.pickImageBtnText}>
-                Pick images from album
-              </Text>
+              <Text style={styles.pickImageBtnText}>从相册选择图片</Text>
             </Pressable>
 
             {selectedImageUris.length > 0 ? (
-              <ScrollView
-                horizontal
-                style={styles.selectedImageRow}
-                showsHorizontalScrollIndicator={false}
-              >
-                {selectedImageUris.map((uri, idx) => (
-                  <Pressable
-                    key={`${idx}-${uri}`}
-                    onPress={() => removeSelectedImage(uri)}
-                  >
-                    <Image source={{ uri }} style={styles.selectedImage} />
-                  </Pressable>
-                ))}
-              </ScrollView>
+              <>
+                <Text style={styles.selectedHint}>点击查看，长按删除</Text>
+                <ScrollView
+                  horizontal
+                  style={styles.selectedImageRow}
+                  showsHorizontalScrollIndicator={false}
+                >
+                  {selectedImageUris.map((uri, idx) => (
+                    <Pressable
+                      key={`${idx}-${uri}`}
+                      onPress={() => setPreviewImageUri(uri)}
+                      onLongPress={() => removeSelectedImage(uri)}
+                    >
+                      <Image source={{ uri }} style={styles.selectedImage} />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
             ) : null}
 
             <Pressable
               style={styles.mainBtn}
               onPress={() => void onPublishPost()}
             >
-              <Text style={styles.mainBtnText}>Publish</Text>
+              <Text style={styles.mainBtnText}>发布动态</Text>
             </Pressable>
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={!!previewImageUri}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewImageUri(null)}
+      >
+        <View style={styles.previewMask}>
+          <Pressable
+            style={styles.previewClose}
+            onPress={() => setPreviewImageUri(null)}
+          >
+            <Text style={styles.previewCloseText}>关闭</Text>
+          </Pressable>
+          {previewImageUri ? (
+            <Image
+              source={{ uri: previewImageUri }}
+              style={styles.previewImg}
+            />
+          ) : null}
+          <Pressable
+            style={styles.previewSaveBtn}
+            disabled={savingPreview}
+            onPress={() => void onSavePreviewImage()}
+          >
+            <Text style={styles.previewSaveBtnText}>
+              {savingPreview ? "保存中..." : "保存到本地"}
+            </Text>
+          </Pressable>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -666,6 +763,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   pickImageBtnText: { color: "#274F9A", fontWeight: "600", fontSize: 14 },
+  selectedHint: { color: "#5A708D", fontSize: 12, marginBottom: 6 },
   selectedImageRow: { marginBottom: 8 },
   selectedImage: {
     width: 72,
@@ -696,4 +794,37 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarFallbackText: { color: "#fff", fontWeight: "700" },
+  previewMask: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.9)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
+  },
+  previewImg: {
+    width: "100%",
+    height: "65%",
+    borderRadius: 12,
+    backgroundColor: "#222",
+  },
+  previewClose: {
+    position: "absolute",
+    top: 60,
+    right: 20,
+    zIndex: 2,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: "rgba(255,255,255,0.15)",
+  },
+  previewCloseText: { color: "#fff", fontWeight: "700" },
+  previewSaveBtn: {
+    marginTop: 16,
+    borderRadius: 10,
+    backgroundColor: "#0A69F5",
+    alignItems: "center",
+    paddingVertical: 11,
+    width: "100%",
+  },
+  previewSaveBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

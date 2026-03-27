@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { database } from "@/model";
 import Expense from "@/model/Expense";
+import { syncMockSpaceToDatabase } from "./dbSync";
 import { getSpaceByCode, type SpaceData } from "./mockApp";
 
 type LedgerExpense = {
@@ -120,7 +121,10 @@ export default function SettlementPage() {
       const nextSpace = getSpaceByCode(spaceCode);
       setSpace(nextSpace);
       if (nextSpace) {
-        void loadDbExpenses(nextSpace.id);
+        void (async () => {
+          await syncMockSpaceToDatabase(nextSpace);
+          await loadDbExpenses(nextSpace.id);
+        })();
       } else {
         setDbExpenses([]);
       }
@@ -132,14 +136,7 @@ export default function SettlementPage() {
       return [];
     }
 
-    const mockExpenses: LedgerExpense[] = (space.expenses ?? []).map(
-      (item) => ({
-        amountYuan: item.amount,
-        payerName: item.payer_name,
-      }),
-    );
-
-    return calcSettlements(space.members, [...dbExpenses, ...mockExpenses]);
+    return calcSettlements(space.members, dbExpenses);
   }, [space, dbExpenses]);
 
   return (

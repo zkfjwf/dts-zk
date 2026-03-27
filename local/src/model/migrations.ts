@@ -30,5 +30,22 @@ export default schemaMigrations({
         }),
       ],
     },
+    {
+      toVersion: 3,
+      steps: [
+        createTable({
+          name: "post_comments",
+          columns: [
+            { name: "space_id", type: "string", isIndexed: true },
+            { name: "post_id", type: "string", isIndexed: true },
+            { name: "author_id", type: "string" },
+            { name: "author_name", type: "string", isOptional: true },
+            { name: "text", type: "string" },
+            { name: "created_at", type: "number" },
+            { name: "updated_at", type: "number" },
+          ],
+        }),
+      ],
+    },
   ],
 });

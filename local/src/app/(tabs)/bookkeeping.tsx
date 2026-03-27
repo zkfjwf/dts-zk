@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { database } from "@/model";
 import Expense from "@/model/Expense";
+import { syncMockSpaceToDatabase } from "./dbSync";
 import { getCurrentUser, getSpaceByCode, type SpaceData } from "./mockApp";
 
 type LedgerExpense = {
@@ -66,28 +67,20 @@ export default function BookkeepingPage() {
       const nextSpace = getSpaceByCode(spaceCode);
       setSpace(nextSpace);
       if (nextSpace) {
-        void loadDbExpenses(nextSpace.id);
+        void (async () => {
+          await syncMockSpaceToDatabase(nextSpace);
+          await loadDbExpenses(nextSpace.id);
+        })();
       } else {
         setDbExpenses([]);
       }
     }, [spaceCode, loadDbExpenses]),
   );
 
-  const allExpenses = useMemo(() => {
-    const mockExpenses: LedgerExpense[] = (space?.expenses ?? []).map(
-      (item) => ({
-        id: `mock-${item.id}`,
-        amountYuan: item.amount,
-        description: item.description,
-        payerName: item.payer_name,
-        createdAt: item.created_at,
-      }),
-    );
-
-    return [...dbExpenses, ...mockExpenses].sort(
-      (a, b) => b.createdAt - a.createdAt,
-    );
-  }, [dbExpenses, space]);
+  const allExpenses = useMemo(
+    () => [...dbExpenses].sort((a, b) => b.createdAt - a.createdAt),
+    [dbExpenses],
+  );
 
   const summary = useMemo(() => {
     const total = allExpenses.reduce((acc, item) => acc + item.amountYuan, 0);

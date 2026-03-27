@@ -9,6 +9,7 @@ import migrations from "../model/migrations";
 import Expense from "@/model/Expense";
 import Photo from "@/model/Photo";
 import Post from "@/model/Post";
+import PostComment from "@/model/PostComment";
 
 const isTestEnv = process.env.NODE_ENV === "test";
 // First, create the adapter to the underlying database:
@@ -35,5 +36,5 @@ const adapter = isTestEnv
 // Then, make a Watermelon database from it!
 export const database = new Database({
   adapter,
-  modelClasses: [Expense, Photo, Post],
+  modelClasses: [Expense, Photo, Post, PostComment],
 });
