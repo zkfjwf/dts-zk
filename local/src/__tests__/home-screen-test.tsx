@@ -1,11 +1,10 @@
 import { render } from "@testing-library/react-native";
 
-import HomeScreen, { CustomText } from "@/app/(tabs)/index";
+import HomeScreen from "@/app/(tabs)/index";
 
 describe("<HomeScreen />", () => {
-  test("Text renders correctly on HomeScreen", () => {
+  test("renders lobby title", () => {
     const { getByText } = render(<HomeScreen />);
-
-    getByText("Welcome!");
+    expect(getByText("旅行空间大厅")).toBeTruthy();
   });
 });

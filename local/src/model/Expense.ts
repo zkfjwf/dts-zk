@@ -8,15 +8,21 @@ import {
 } from "@nozbe/watermelondb/decorators";
 
 export default class Expense extends Model {
-  // 对应 schema 中的 'expenses' 表
+  // 瀵瑰簲 schema 涓殑 'expenses' 琛?
   static table = "expenses";
 
-  // 定义关联：这个账单属于哪个空间
+  // 瀹氫箟鍏宠仈锛氳繖涓处鍗曞睘浜庡摢涓┖闂?
   // @ts-ignore
   @relation("spaces", "space_id") space;
 
   // @ts-ignore
+  @text("space_id") spaceId;
+
+  // @ts-ignore
   @text("payer_id") payerId;
+
+  // @ts-ignore
+  @text("payer_name") payerName;
 
   // @ts-ignore
   @field("amount") amount;
@@ -24,7 +30,7 @@ export default class Expense extends Model {
   // @ts-ignore
   @text("description") description;
 
-  // WatermelonDB 会自动管理的创建/更新时间
+  // WatermelonDB 浼氳嚜鍔ㄧ鐞嗙殑鍒涘缓/鏇存柊鏃堕棿
   // @ts-ignore
   @readonly @date("created_at") createdAt;
 
