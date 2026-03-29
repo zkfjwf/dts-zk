@@ -1,7 +1,8 @@
-import { router } from "expo-router";
-import { useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   Alert,
+  Image,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -9,11 +10,60 @@ import {
   TextInput,
   View,
 } from "react-native";
+import {
+  ensureCurrentUserProfileInDb,
+  getCurrentUserProfileFromDb,
+} from "./userDb";
 import { createSpaceForCurrentUser, joinSpaceByCode } from "./mockApp";
+
+type HeaderUser = {
+  nickname: string;
+  avatarUri: string;
+};
+
+function HeaderAvatar({
+  avatarUri,
+  nickname,
+  onPress,
+}: {
+  avatarUri: string;
+  nickname: string;
+  onPress: () => void;
+}) {
+  const fallback = nickname.trim().slice(-1) || "我";
+  return (
+    <Pressable style={styles.headerAvatarWrap} onPress={onPress}>
+      {avatarUri ? (
+        <Image source={{ uri: avatarUri }} style={styles.headerAvatar} />
+      ) : (
+        <View style={styles.headerAvatarFallback}>
+          <Text style={styles.headerAvatarFallbackText}>{fallback}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
 
 export default function SpaceLobbyPage() {
   const [spaceCodeInput, setSpaceCodeInput] = useState("");
   const [latestCreatedCode, setLatestCreatedCode] = useState("");
+  const [headerUser, setHeaderUser] = useState<HeaderUser>({
+    nickname: "旅行者",
+    avatarUri: "",
+  });
+
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        await ensureCurrentUserProfileInDb();
+        const profile = await getCurrentUserProfileFromDb();
+        setHeaderUser({
+          nickname: profile.nickname,
+          avatarUri: profile.avatarLocalUri || profile.avatarRemoteUrl || "",
+        });
+      })();
+    }, []),
+  );
 
   const goSpacePage = (code: string) => {
     router.push({ pathname: "/team", params: { code } });
@@ -39,8 +89,17 @@ export default function SpaceLobbyPage() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <Text style={styles.title}>旅行空间大厅</Text>
-        <Text style={styles.subtitle}>创建旅行空间或输入口令加入</Text>
+        <View style={styles.topRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>旅行空间大厅</Text>
+            <Text style={styles.subtitle}>创建旅行空间或输入口令加入</Text>
+          </View>
+          <HeaderAvatar
+            avatarUri={headerUser.avatarUri}
+            nickname={headerUser.nickname}
+            onPress={() => router.push("/profile")}
+          />
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.label}>空间口令（ULID）</Text>
@@ -76,8 +135,34 @@ export default function SpaceLobbyPage() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#EEF4FA" },
   container: { flex: 1, paddingHorizontal: 16, paddingTop: 28 },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
   title: { fontSize: 30, fontWeight: "700", color: "#19263B" },
   subtitle: { marginTop: 12, color: "#566982", fontSize: 14 },
+  headerAvatarWrap: { marginTop: 2 },
+  headerAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#D9E5F4",
+  },
+  headerAvatarFallback: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#4F7EDB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerAvatarFallbackText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 18,
+  },
   card: {
     marginTop: 20,
     backgroundColor: "#FFFFFF",

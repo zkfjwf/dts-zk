@@ -229,6 +229,45 @@ export function getCurrentUser() {
   return CURRENT_USER;
 }
 
+export function updateCurrentUserProfile(next: {
+  nickname?: string;
+  avatarUrl?: string;
+}) {
+  const prevNickname = CURRENT_USER.username;
+
+  if (next.nickname && next.nickname.trim()) {
+    const clean = next.nickname.trim();
+    CURRENT_USER.username = clean;
+    CURRENT_USER.nickname = clean;
+    CURRENT_USER.accountName = clean;
+  }
+
+  if (next.avatarUrl && next.avatarUrl.trim()) {
+    CURRENT_USER.avatarUrl = next.avatarUrl.trim();
+  }
+
+  const latestNickname = CURRENT_USER.username;
+  const latestAvatar = CURRENT_USER.avatarUrl;
+
+  for (const space of spaces.values()) {
+    space.users = space.users.map((user) =>
+      user.id === CURRENT_USER.id
+        ? { ...user, nickname: latestNickname, avatarUrl: latestAvatar }
+        : user,
+    );
+
+    space.members = space.members.map((name) =>
+      name === prevNickname ? latestNickname : name,
+    );
+
+    space.locations = space.locations.map((item) =>
+      item.user_id === CURRENT_USER.id
+        ? { ...item, username: latestNickname, avatarUrl: latestAvatar }
+        : item,
+    );
+  }
+}
+
 export function createSpaceForCurrentUser() {
   const code = createSpaceCode();
   const createdAt = nowTs();

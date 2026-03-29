@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	// module name is travel
@@ -20,18 +20,20 @@ func main() {
 
 	r := gin.Default()
 
-	// 为了解决本地开发的CORS问题
-    r.Use(cors.New(cors.Config{
+	// 为了解决本地开发的 CORS 问题
+	r.Use(cors.New(cors.Config{
 		AllowAllOrigins:  true,
-        AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-        AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-        ExposeHeaders:    []string{"Content-Length"},
-        AllowCredentials: true,
-        MaxAge:           12 * time.Hour,
-    }))
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	r.GET("/hello", http.HttpHello)
+	r.GET("/favicon.ico", http.HttpNoContent)
+	r.GET("/baidu/live-map", http.ServeBaiduLiveMap)
 	r.GET("/ws", ws.WsHello)
-	
+
 	r.Run(addr)
 }

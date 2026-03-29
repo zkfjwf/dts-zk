@@ -47,5 +47,21 @@ export default schemaMigrations({
         }),
       ],
     },
+    {
+      toVersion: 4,
+      steps: [
+        createTable({
+          name: "users",
+          columns: [
+            { name: "user_id", type: "string", isIndexed: true },
+            { name: "nickname", type: "string" },
+            { name: "avatar_local_uri", type: "string", isOptional: true },
+            { name: "avatar_remote_url", type: "string", isOptional: true },
+            { name: "created_at", type: "number" },
+            { name: "updated_at", type: "number" },
+          ],
+        }),
+      ],
+    },
   ],
 });

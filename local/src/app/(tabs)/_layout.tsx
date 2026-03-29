@@ -9,8 +9,6 @@ export default function TabLayout() {
       <Stack.Screen name="bookkeeping" />
       <Stack.Screen name="settlement" />
       <Stack.Screen name="location" />
-      <Stack.Screen name="db" options={{ presentation: "card" }} />
-      <Stack.Screen name="network" options={{ presentation: "card" }} />
     </Stack>
   );
 }

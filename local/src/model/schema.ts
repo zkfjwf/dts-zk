@@ -1,8 +1,19 @@
 import { appSchema, tableSchema } from "@nozbe/watermelondb";
 
 export default appSchema({
-  version: 3,
+  version: 4,
   tables: [
+    tableSchema({
+      name: "users",
+      columns: [
+        { name: "user_id", type: "string", isIndexed: true },
+        { name: "nickname", type: "string" },
+        { name: "avatar_local_uri", type: "string", isOptional: true },
+        { name: "avatar_remote_url", type: "string", isOptional: true },
+        { name: "created_at", type: "number" },
+        { name: "updated_at", type: "number" },
+      ],
+    }),
     tableSchema({
       name: "spaces",
       columns: [

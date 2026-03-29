@@ -30,7 +30,6 @@ import {
 } from "./mockApp";
 
 type ImagePickerModule = {
-  requestMediaLibraryPermissionsAsync: () => Promise<{ granted: boolean }>;
   launchImageLibraryAsync: (options: Record<string, unknown>) => Promise<{
     canceled: boolean;
     assets: { uri: string }[];
@@ -116,7 +115,7 @@ async function saveImageToLocalDir(uri: string, folderName: string) {
 
 function Avatar({ uri, name }: { uri?: string; name: string }) {
   const [failed, setFailed] = useState(false);
-  const text = name.trim().slice(-1) || "U";
+  const text = name.trim().slice(-1) || "友";
 
   if (!uri || failed) {
     return (
@@ -135,6 +134,29 @@ function Avatar({ uri, name }: { uri?: string; name: string }) {
   );
 }
 
+function FeedImage({ uri }: { uri: string }) {
+  const [aspectRatio, setAspectRatio] = useState(1);
+
+  return (
+    <Image
+      source={{ uri }}
+      style={[
+        styles.postImage,
+        aspectRatio >= 1 ? styles.postImageLandscape : styles.postImagePortrait,
+        { aspectRatio },
+      ]}
+      resizeMode="contain"
+      onLoad={({ nativeEvent }) => {
+        const width = nativeEvent.source?.width ?? 0;
+        const height = nativeEvent.source?.height ?? 0;
+        if (width > 0 && height > 0) {
+          setAspectRatio(width / height);
+        }
+      }}
+    />
+  );
+}
+
 export default function TeamPage() {
   const { code } = useLocalSearchParams<{ code?: string }>();
   const spaceCode = typeof code === "string" ? code : "";
@@ -149,6 +171,7 @@ export default function TeamPage() {
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>(
     {},
   );
+  const [commentingPostId, setCommentingPostId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const [savingPreview, setSavingPreview] = useState(false);
@@ -251,23 +274,17 @@ export default function TeamPage() {
     if (!imagePicker) {
       Alert.alert(
         "相册不可用",
-        "当前安装包未包含 image-picker 原生模块，请重建开发包。",
+        "当前构建未包含图片选择原生模块，请重新构建开发客户端。",
       );
       return;
     }
 
     try {
-      const permission =
-        await imagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert("权限不足", "请先授权访问相册。");
-        return;
-      }
-
       const result = await imagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
+        allowsEditing: false,
         allowsMultipleSelection: true,
-        quality: 0.85,
+        quality: 1,
         selectionLimit: 9,
       });
 
@@ -280,7 +297,7 @@ export default function TeamPage() {
         .filter(Boolean);
       setSelectedImageUris((prev) => Array.from(new Set([...prev, ...uris])));
     } catch (error) {
-      Alert.alert("相册异常", `打开失败：${String(error)}`);
+      Alert.alert("相册异常", String(error));
     }
   };
 
@@ -297,7 +314,7 @@ export default function TeamPage() {
     const mergedInputUris = Array.from(new Set(selectedImageUris));
 
     if (!cleanText && mergedInputUris.length === 0) {
-      Alert.alert("发布失败", "请填写文字或至少上传一张图片。");
+      Alert.alert("发布失败", "请填写文字或至少选择一张图片。");
       return;
     }
 
@@ -344,6 +361,7 @@ export default function TeamPage() {
     if (!space) {
       return;
     }
+
     const content = (commentInputs[postId] ?? "").trim();
     if (!content) {
       Alert.alert("评论失败", "请输入评论内容。");
@@ -362,6 +380,7 @@ export default function TeamPage() {
     });
 
     setCommentInputs((prev) => ({ ...prev, [postId]: "" }));
+    setCommentingPostId(null);
     await loadDbPosts(space.id);
   };
 
@@ -369,13 +388,16 @@ export default function TeamPage() {
     if (!previewImageUri) {
       return;
     }
+
     setSavingPreview(true);
-    const localPath = await saveImageToLocalDir(
-      previewImageUri,
-      "travel-saved-images",
-    );
-    setSavingPreview(false);
-    Alert.alert("保存成功", `已保存到本地：${localPath}`);
+    try {
+      await saveImageToLocalDir(previewImageUri, "travel-saved-images");
+      Alert.alert("已保存", "图片已保存到应用本地。");
+    } catch (error) {
+      Alert.alert("保存失败", String(error));
+    } finally {
+      setSavingPreview(false);
+    }
   };
 
   const onLeave = () => {
@@ -397,9 +419,10 @@ export default function TeamPage() {
     if (!spaceCode) {
       return;
     }
+
     const ok = disbandSpaceByCode(spaceCode);
     if (!ok) {
-      Alert.alert("解散失败", "空间不存在。");
+      Alert.alert("解散失败", "未找到当前空间。");
       return;
     }
     router.replace("/");
@@ -411,7 +434,7 @@ export default function TeamPage() {
         <View style={styles.centerWrap}>
           <Text style={styles.emptyTitle}>空间不存在</Text>
           <Pressable style={styles.mainBtn} onPress={() => router.replace("/")}>
-            <Text style={styles.mainBtnText}>返回</Text>
+            <Text style={styles.mainBtnText}>返回首页</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -449,7 +472,7 @@ export default function TeamPage() {
                   })
                 }
               >
-                <Text style={styles.menuText}>记账</Text>
+                <Text style={styles.menuText}>行程记账</Text>
               </Pressable>
               <Pressable
                 style={styles.menuItem}
@@ -460,7 +483,7 @@ export default function TeamPage() {
                   })
                 }
               >
-                <Text style={styles.menuText}>位置</Text>
+                <Text style={styles.menuText}>位置共享</Text>
               </Pressable>
               <Pressable style={styles.menuItem} onPress={onLeave}>
                 <Text style={styles.menuText}>退出空间</Text>
@@ -478,7 +501,9 @@ export default function TeamPage() {
           >
             {dbPosts.length === 0 ? (
               <View style={styles.postCard}>
-                <Text style={styles.commentHint}>暂时还没有动态</Text>
+                <Text style={styles.commentHint}>
+                  还没有动态，先来发第一条吧
+                </Text>
               </View>
             ) : null}
 
@@ -510,7 +535,7 @@ export default function TeamPage() {
                           key={`${post.id}-${idx}-${uri}`}
                           onPress={() => setPreviewImageUri(uri)}
                         >
-                          <Image source={{ uri }} style={styles.postImage} />
+                          <FeedImage uri={uri} />
                         </Pressable>
                       ))}
                     </ScrollView>
@@ -534,8 +559,14 @@ export default function TeamPage() {
                   <View style={styles.commentRow}>
                     <TextInput
                       style={styles.commentInput}
-                      placeholder="写评论"
+                      placeholder="写下评论"
                       value={commentInputs[post.id] ?? ""}
+                      onFocus={() => setCommentingPostId(post.id)}
+                      onBlur={() =>
+                        setCommentingPostId((current) =>
+                          current === post.id ? null : current,
+                        )
+                      }
                       onChangeText={(text) =>
                         setCommentInputs((prev) => ({
                           ...prev,
@@ -557,51 +588,57 @@ export default function TeamPage() {
             })}
           </ScrollView>
 
-          <View style={styles.composer}>
-            <TextInput
-              style={styles.input}
-              placeholder="动态文字（可不填）"
-              value={postText}
-              onChangeText={setPostText}
-              multiline
-              textAlignVertical="top"
-            />
+          {commentingPostId ? null : (
+            <View style={styles.composer}>
+              <TextInput
+                style={styles.input}
+                placeholder="分享这段旅程中的见闻..."
+                value={postText}
+                onChangeText={setPostText}
+                multiline
+                textAlignVertical="top"
+              />
 
-            <Pressable
-              style={styles.pickImageBtn}
-              onPress={() => void pickImagesFromAlbum()}
-            >
-              <Text style={styles.pickImageBtnText}>从相册选择图片</Text>
-            </Pressable>
+              <Pressable
+                style={styles.pickImageBtn}
+                onPress={() => void pickImagesFromAlbum()}
+              >
+                <Text style={styles.pickImageBtnText}>选择图片</Text>
+              </Pressable>
 
-            {selectedImageUris.length > 0 ? (
-              <>
-                <Text style={styles.selectedHint}>点击查看，长按删除</Text>
-                <ScrollView
-                  horizontal
-                  style={styles.selectedImageRow}
-                  showsHorizontalScrollIndicator={false}
-                >
-                  {selectedImageUris.map((uri, idx) => (
-                    <Pressable
-                      key={`${idx}-${uri}`}
-                      onPress={() => setPreviewImageUri(uri)}
-                      onLongPress={() => removeSelectedImage(uri)}
-                    >
-                      <Image source={{ uri }} style={styles.selectedImage} />
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </>
-            ) : null}
+              {selectedImageUris.length > 0 ? (
+                <>
+                  <Text style={styles.selectedHint}>点按预览，长按删除</Text>
+                  <ScrollView
+                    horizontal
+                    style={styles.selectedImageRow}
+                    showsHorizontalScrollIndicator={false}
+                  >
+                    {selectedImageUris.map((uri, idx) => (
+                      <Pressable
+                        key={`${idx}-${uri}`}
+                        onPress={() => setPreviewImageUri(uri)}
+                        onLongPress={() => removeSelectedImage(uri)}
+                      >
+                        <Image
+                          source={{ uri }}
+                          style={styles.selectedImage}
+                          resizeMode="contain"
+                        />
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </>
+              ) : null}
 
-            <Pressable
-              style={styles.mainBtn}
-              onPress={() => void onPublishPost()}
-            >
-              <Text style={styles.mainBtnText}>发布动态</Text>
-            </Pressable>
-          </View>
+              <Pressable
+                style={styles.mainBtn}
+                onPress={() => void onPublishPost()}
+              >
+                <Text style={styles.mainBtnText}>发布动态</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       </KeyboardAvoidingView>
 
@@ -622,6 +659,7 @@ export default function TeamPage() {
             <Image
               source={{ uri: previewImageUri }}
               style={styles.previewImg}
+              resizeMode="contain"
             />
           ) : null}
           <Pressable
@@ -630,7 +668,7 @@ export default function TeamPage() {
             onPress={() => void onSavePreviewImage()}
           >
             <Text style={styles.previewSaveBtnText}>
-              {savingPreview ? "保存中..." : "保存到本地"}
+              {savingPreview ? "保存中..." : "保存到应用内"}
             </Text>
           </Pressable>
         </View>
@@ -701,13 +739,13 @@ const styles = StyleSheet.create({
   meta: { color: "#667D9A", fontSize: 12, marginTop: 2 },
   postText: { marginTop: 8, color: "#1F2D44", fontSize: 14, lineHeight: 20 },
   postImage: {
-    width: 220,
-    height: 150,
     borderRadius: 10,
     marginTop: 8,
     marginRight: 8,
     backgroundColor: "#E8EEF7",
   },
+  postImageLandscape: { width: 240 },
+  postImagePortrait: { height: 260 },
   commentList: { marginTop: 8, gap: 6 },
   commentItem: {
     borderRadius: 8,
