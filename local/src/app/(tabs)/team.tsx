@@ -1,10 +1,11 @@
 import { Q } from "@nozbe/watermelondb";
 import * as FileSystem from "expo-file-system/legacy";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,6 +17,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SoftIconBadge } from "@/components/SoftIconBadge";
 import { database } from "@/model";
 import Photo from "@/model/Photo";
 import Post from "@/model/Post";
@@ -28,6 +30,11 @@ import {
   leaveSpaceByCode,
   type SpaceData,
 } from "./mockApp";
+import {
+  ensureCurrentUserProfileInDb,
+  getCurrentUserProfileFromDb,
+  type UserProfileData,
+} from "./userDb";
 
 type ImagePickerModule = {
   launchImageLibraryAsync: (options: Record<string, unknown>) => Promise<{
@@ -115,7 +122,7 @@ async function saveImageToLocalDir(uri: string, folderName: string) {
 
 function Avatar({ uri, name }: { uri?: string; name: string }) {
   const [failed, setFailed] = useState(false);
-  const text = name.trim().slice(-1) || "友";
+  const text = name.trim().slice(-1) || "旅";
 
   if (!uri || failed) {
     return (
@@ -175,6 +182,13 @@ export default function TeamPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const [savingPreview, setSavingPreview] = useState(false);
+  const [currentProfile, setCurrentProfile] = useState<UserProfileData | null>(
+    null,
+  );
+
+  const commentInputRefs = useRef<Record<string, { blur?: () => void } | null>>(
+    {},
+  );
 
   const loadDbPosts = useCallback(async (spaceId: string) => {
     const postCollection = database.collections.get<Post>("posts");
@@ -213,7 +227,7 @@ export default function TeamPage() {
       const list = commentMap.get(item.postId) ?? [];
       list.push({
         id: item.id,
-        author: item.authorName || "成员",
+        author: item.authorName || "鎴愬憳",
         text: item.textContent || "",
         createdAt:
           item.createdAt instanceof Date
@@ -227,7 +241,7 @@ export default function TeamPage() {
       posts.map((item) => ({
         id: item.id,
         uploaderId: item.uploaderId,
-        uploaderName: item.uploaderName || "成员",
+        uploaderName: item.uploaderName || "鎴愬憳",
         text: item.textContent || "",
         imageUris: photoMap.get(item.id) ?? [],
         createdAt:
@@ -244,6 +258,7 @@ export default function TeamPage() {
       if (!spaceCode) {
         setSpace(null);
         setDbPosts([]);
+        setCurrentProfile(null);
         return;
       }
 
@@ -251,14 +266,18 @@ export default function TeamPage() {
       setSpace(nextSpace);
       if (!nextSpace) {
         setDbPosts([]);
+        setCurrentProfile(null);
         return;
       }
 
       void (async () => {
+        await ensureCurrentUserProfileInDb();
+        const profile = await getCurrentUserProfileFromDb();
+        setCurrentProfile(profile);
         await syncMockSpaceToDatabase(nextSpace);
         await loadDbPosts(nextSpace.id);
       })();
-    }, [spaceCode, loadDbPosts]),
+    }, [loadDbPosts, spaceCode]),
   );
 
   const users = useMemo(() => {
@@ -266,15 +285,31 @@ export default function TeamPage() {
     for (const user of space?.users ?? []) {
       map.set(user.id, user);
     }
+
+    map.set(currentUser.id, {
+      nickname: currentProfile?.nickname || currentUser.username,
+      avatarUrl:
+        currentProfile?.avatarLocalUri ||
+        currentProfile?.avatarRemoteUrl ||
+        currentUser.avatarUrl ||
+        "",
+    });
+
     return map;
-  }, [space]);
+  }, [
+    currentProfile,
+    currentUser.avatarUrl,
+    currentUser.id,
+    currentUser.username,
+    space,
+  ]);
 
   const pickImagesFromAlbum = async () => {
     const imagePicker = getImagePickerModule();
     if (!imagePicker) {
       Alert.alert(
         "相册不可用",
-        "当前构建未包含图片选择原生模块，请重新构建开发客户端。",
+        "当前构建未包含图片选择模块，请重新构建开发客户端。",
       );
       return;
     }
@@ -336,7 +371,7 @@ export default function TeamPage() {
       await postCollection.create((post) => {
         post.spaceId = space.id;
         post.uploaderId = currentUser.id;
-        post.uploaderName = currentUser.username;
+        post.uploaderName = currentProfile?.nickname || currentUser.username;
         post.textContent = cleanText;
         createdPostId = post.id;
       });
@@ -368,19 +403,22 @@ export default function TeamPage() {
       return;
     }
 
+    commentInputRefs.current[postId]?.blur?.();
+    Keyboard.dismiss();
+    setCommentingPostId(null);
+
     await database.write(async () => {
       const collection = database.collections.get<PostComment>("post_comments");
       await collection.create((item) => {
         item.spaceId = space.id;
         item.postId = postId;
         item.authorId = currentUser.id;
-        item.authorName = currentUser.username;
+        item.authorName = currentProfile?.nickname || currentUser.username;
         item.textContent = content;
       });
     });
 
     setCommentInputs((prev) => ({ ...prev, [postId]: "" }));
-    setCommentingPostId(null);
     await loadDbPosts(space.id);
   };
 
@@ -392,7 +430,7 @@ export default function TeamPage() {
     setSavingPreview(true);
     try {
       await saveImageToLocalDir(previewImageUri, "travel-saved-images");
-      Alert.alert("已保存", "图片已保存到应用本地。");
+      Alert.alert("已保存", "图片已经保存到应用本地。");
     } catch (error) {
       Alert.alert("保存失败", String(error));
     } finally {
@@ -422,7 +460,7 @@ export default function TeamPage() {
 
     const ok = disbandSpaceByCode(spaceCode);
     if (!ok) {
-      Alert.alert("解散失败", "未找到当前空间。");
+      Alert.alert("解散失败", "没有找到当前空间。");
       return;
     }
     router.replace("/");
@@ -457,7 +495,12 @@ export default function TeamPage() {
               style={styles.menuTrigger}
               onPress={() => setMenuOpen((v) => !v)}
             >
-              <Text style={styles.menuTriggerText}>+</Text>
+              <SoftIconBadge
+                name={menuOpen ? "close-outline" : "apps-outline"}
+                tone={menuOpen ? "peach" : "sky"}
+                size={48}
+                iconSize={22}
+              />
             </Pressable>
           </View>
 
@@ -465,31 +508,79 @@ export default function TeamPage() {
             <View style={styles.menuCard}>
               <Pressable
                 style={styles.menuItem}
-                onPress={() =>
+                onPress={() => {
+                  setMenuOpen(false);
                   router.push({
                     pathname: "/bookkeeping",
                     params: { code: spaceCode },
-                  })
-                }
+                  });
+                }}
               >
-                <Text style={styles.menuText}>行程记账</Text>
+                <View style={styles.menuItemIconRow}>
+                  <SoftIconBadge
+                    name="wallet-outline"
+                    tone="peach"
+                    size={44}
+                    iconSize={19}
+                  />
+                  <View style={styles.menuItemTextWrap}>
+                    <Text style={styles.menuText}>旅行记账</Text>
+                    <Text style={styles.menuItemSubText}>记录消费与结算</Text>
+                  </View>
+                </View>
               </Pressable>
               <Pressable
                 style={styles.menuItem}
-                onPress={() =>
+                onPress={() => {
+                  setMenuOpen(false);
                   router.push({
                     pathname: "/location",
                     params: { code: spaceCode },
-                  })
-                }
+                  });
+                }}
               >
-                <Text style={styles.menuText}>位置共享</Text>
+                <View style={styles.menuItemIconRow}>
+                  <SoftIconBadge
+                    name="navigate-outline"
+                    tone="mint"
+                    size={44}
+                    iconSize={19}
+                  />
+                  <View style={styles.menuItemTextWrap}>
+                    <Text style={styles.menuText}>位置共享</Text>
+                    <Text style={styles.menuItemSubText}>查看旅伴实时位置</Text>
+                  </View>
+                </View>
               </Pressable>
               <Pressable style={styles.menuItem} onPress={onLeave}>
-                <Text style={styles.menuText}>退出空间</Text>
+                <View style={styles.menuItemIconRow}>
+                  <SoftIconBadge
+                    name="log-out-outline"
+                    tone="aqua"
+                    size={44}
+                    iconSize={19}
+                  />
+                  <View style={styles.menuItemTextWrap}>
+                    <Text style={styles.menuText}>退出空间</Text>
+                    <Text style={styles.menuItemSubText}>离开当前同行空间</Text>
+                  </View>
+                </View>
               </Pressable>
               <Pressable style={styles.menuItem} onPress={onDisband}>
-                <Text style={styles.menuDangerText}>解散空间</Text>
+                <View style={styles.menuItemIconRow}>
+                  <SoftIconBadge
+                    name="trash-outline"
+                    tone="violet"
+                    size={44}
+                    iconSize={19}
+                  />
+                  <View style={styles.menuItemTextWrap}>
+                    <Text style={styles.menuDangerText}>解散空间</Text>
+                    <Text style={styles.menuItemSubText}>
+                      谨慎操作，不可恢复
+                    </Text>
+                  </View>
+                </View>
               </Pressable>
             </View>
           ) : null}
@@ -501,20 +592,21 @@ export default function TeamPage() {
           >
             {dbPosts.length === 0 ? (
               <View style={styles.postCard}>
-                <Text style={styles.commentHint}>
-                  还没有动态，先来发第一条吧
-                </Text>
+                <Text style={styles.commentHint}>还没有动态，先发第一条吧</Text>
               </View>
             ) : null}
 
             {dbPosts.map((post) => {
               const author = users.get(post.uploaderId);
+              const authorName = author?.nickname || post.uploaderName;
+              const authorAvatar = author?.avatarUrl;
+
               return (
                 <View key={post.id} style={styles.postCard}>
                   <View style={styles.postHeader}>
-                    <Avatar uri={author?.avatarUrl} name={post.uploaderName} />
+                    <Avatar uri={authorAvatar} name={authorName} />
                     <View>
-                      <Text style={styles.author}>{post.uploaderName}</Text>
+                      <Text style={styles.author}>{authorName}</Text>
                       <Text style={styles.meta}>
                         {formatTime(post.createdAt)}
                       </Text>
@@ -558,6 +650,9 @@ export default function TeamPage() {
 
                   <View style={styles.commentRow}>
                     <TextInput
+                      ref={(input) => {
+                        commentInputRefs.current[post.id] = input;
+                      }}
                       style={styles.commentInput}
                       placeholder="写下评论"
                       value={commentInputs[post.id] ?? ""}
@@ -608,7 +703,7 @@ export default function TeamPage() {
 
               {selectedImageUris.length > 0 ? (
                 <>
-                  <Text style={styles.selectedHint}>点按预览，长按删除</Text>
+                  <Text style={styles.selectedHint}>点击预览，长按可删除</Text>
                   <ScrollView
                     horizontal
                     style={styles.selectedImageRow}
@@ -701,36 +796,38 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: "700", color: "#1A2940" },
   subTitle: { fontSize: 13, color: "#5D728F", marginTop: 2 },
   menuTrigger: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#0A69F5",
-    justifyContent: "center",
-    alignItems: "center",
+    borderRadius: 24,
   },
   menuTriggerText: { color: "#fff", fontSize: 26, marginTop: -2 },
   menuCard: {
-    position: "absolute",
-    right: 16,
-    top: 66,
-    width: 180,
-    zIndex: 10,
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
+    marginTop: 12,
+    borderRadius: 22,
+    backgroundColor: "#FFFFFF",
+    padding: 10,
+    shadowColor: "#C5D3E2",
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 4,
+    gap: 8,
   },
   menuItem: {
+    borderRadius: 18,
+    backgroundColor: "#F8FBFF",
     paddingHorizontal: 12,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEF3FA",
   },
-  menuText: { color: "#21314A", fontSize: 14, fontWeight: "600" },
-  menuDangerText: { color: "#BE3535", fontSize: 14, fontWeight: "700" },
+  menuItemIconRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  menuItemTextWrap: {
+    flex: 1,
+  },
+  menuText: { color: "#21314A", fontSize: 15, fontWeight: "700" },
+  menuItemSubText: { color: "#7488A0", fontSize: 12, marginTop: 4 },
+  menuDangerText: { color: "#BE3535", fontSize: 15, fontWeight: "800" },
   feed: { flex: 1, marginTop: 12 },
   feedContent: { gap: 10, paddingBottom: 12 },
   postCard: { borderRadius: 12, backgroundColor: "#fff", padding: 12 },

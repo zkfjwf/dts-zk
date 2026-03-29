@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { SoftIconBadge } from "@/components/SoftIconBadge";
 import { database } from "@/model";
 import Expense from "@/model/Expense";
 import { syncMockSpaceToDatabase } from "./dbSync";
@@ -105,7 +106,7 @@ export default function SettlementPage() {
     setDbExpenses(
       records.map((item) => ({
         amountYuan: item.amount / 100,
-        payerName: item.payerName || item.payerId || "未知",
+        payerName: item.payerName || item.payerId || "未知成员",
       })),
     );
   }, []);
@@ -139,13 +140,28 @@ export default function SettlementPage() {
     return calcSettlements(space.members, dbExpenses);
   }, [space, dbExpenses]);
 
+  const totalTransfer = useMemo(
+    () => settlements.reduce((sum, item) => sum + item.amount, 0),
+    [settlements],
+  );
+
+  const memberCount = space?.members.length ?? 0;
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
-          <Text style={styles.title}>平摊结算结果</Text>
+          <View>
+            <Text style={styles.title}>平摊结算</Text>
+            <Text style={styles.subtitle}>
+              用最少的转账次数完成这次旅程的费用结清。
+            </Text>
+          </View>
           <Pressable
-            style={styles.backBtn}
+            style={styles.backButton}
             onPress={() =>
               router.replace({
                 pathname: "/bookkeeping",
@@ -153,63 +169,233 @@ export default function SettlementPage() {
               })
             }
           >
-            <Text style={styles.backBtnText}>返回记账</Text>
+            <Text style={styles.backButtonText}>返回记账</Text>
           </Pressable>
         </View>
 
-        <ScrollView>
-          {settlements.length === 0 ? (
-            <View style={styles.card}>
-              <Text style={styles.emptyText}>当前无需转账，账目已平衡。</Text>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryHeader}>
+            <SoftIconBadge
+              name="swap-horizontal-outline"
+              tone="mint"
+              size={54}
+            />
+            <View style={styles.summaryHeaderTextWrap}>
+              <Text style={styles.summaryTitle}>结算概览</Text>
+              <Text style={styles.summarySubtitle}>
+                {space?.name || "旅行空间"} · {memberCount} 位成员
+              </Text>
             </View>
-          ) : (
-            settlements.map((item, idx) => (
-              <View key={`${item.from}-${item.to}-${idx}`} style={styles.card}>
-                <Text style={styles.mainText}>
-                  {item.from} 需要支付给 {item.to}
-                </Text>
-                <Text style={styles.amountText}>
-                  {item.amount.toFixed(2)} 元
-                </Text>
+          </View>
+
+          <View style={styles.summaryGrid}>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>需要转账</Text>
+              <Text style={styles.summaryValue}>{settlements.length} 笔</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>待结金额</Text>
+              <Text style={styles.summaryValue}>
+                {totalTransfer.toFixed(2)} 元
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {settlements.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <SoftIconBadge
+              name="checkmark-done-outline"
+              tone="aqua"
+              size={54}
+            />
+            <Text style={styles.emptyTitle}>当前无需转账</Text>
+            <Text style={styles.emptyText}>
+              账目已经平衡，大家可以轻松继续旅程。
+            </Text>
+          </View>
+        ) : (
+          settlements.map((item, idx) => (
+            <View key={`${item.from}-${item.to}-${idx}`} style={styles.card}>
+              <View style={styles.cardTop}>
+                <SoftIconBadge
+                  name="card-outline"
+                  tone="peach"
+                  size={48}
+                  iconSize={20}
+                />
+                <View style={styles.cardTextWrap}>
+                  <Text style={styles.mainText}>
+                    {item.from} 需要支付给 {item.to}
+                  </Text>
+                  <Text style={styles.subText}>
+                    建议当面确认或备注旅程结算。
+                  </Text>
+                </View>
               </View>
-            ))
-          )}
-        </ScrollView>
-      </View>
+              <Text style={styles.amountText}>{item.amount.toFixed(2)} 元</Text>
+            </View>
+          ))
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#EAF1FA" },
-  container: { flex: 1, paddingHorizontal: 16, paddingTop: 28 },
+  safeArea: { flex: 1, backgroundColor: "#F4F7FB" },
+  scrollContent: {
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 32,
+    gap: 18,
+  },
   header: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 12,
+    gap: 12,
   },
-  title: { fontSize: 24, fontWeight: "700", color: "#1A2940" },
-  backBtn: {
+  title: {
+    color: "#1D2C40",
+    fontSize: 30,
+    fontWeight: "800",
+  },
+  subtitle: {
+    marginTop: 10,
+    color: "#6E8198",
+    fontSize: 14,
+    lineHeight: 22,
+    maxWidth: 250,
+  },
+  backButton: {
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#8EADE0",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  backBtnText: { color: "#2A549D", fontWeight: "700", fontSize: 13 },
-  card: {
-    borderRadius: 12,
     backgroundColor: "#FFFFFF",
-    padding: 12,
-    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#E5ECF6",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    shadowColor: "#CDD8E7",
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
-  mainText: { fontSize: 15, color: "#1F2D44", fontWeight: "600" },
-  amountText: {
-    marginTop: 6,
-    color: "#0A69F5",
-    fontSize: 18,
+  backButtonText: {
+    color: "#2E4463",
+    fontSize: 14,
     fontWeight: "700",
   },
-  emptyText: { color: "#5A708D", fontSize: 14 },
+  summaryCard: {
+    borderRadius: 28,
+    backgroundColor: "#FFFFFF",
+    padding: 20,
+    shadowColor: "#C5D3E2",
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 5,
+  },
+  summaryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  summaryHeaderTextWrap: { flex: 1 },
+  summaryTitle: {
+    color: "#203044",
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  summarySubtitle: {
+    marginTop: 4,
+    color: "#7588A0",
+    fontSize: 13,
+  },
+  summaryGrid: {
+    marginTop: 18,
+    flexDirection: "row",
+    gap: 12,
+  },
+  summaryItem: {
+    flex: 1,
+    borderRadius: 22,
+    backgroundColor: "#F8FBFF",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: "#EEF2F8",
+  },
+  summaryLabel: {
+    color: "#6C8098",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  summaryValue: {
+    marginTop: 8,
+    color: "#22364E",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  emptyCard: {
+    borderRadius: 28,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 22,
+    paddingVertical: 30,
+    alignItems: "center",
+    shadowColor: "#C5D3E2",
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
+  },
+  emptyTitle: {
+    marginTop: 16,
+    color: "#203146",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  emptyText: {
+    marginTop: 8,
+    color: "#7488A0",
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  card: {
+    borderRadius: 28,
+    backgroundColor: "#FFFFFF",
+    padding: 20,
+    shadowColor: "#C5D3E2",
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
+  },
+  cardTop: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "center",
+  },
+  cardTextWrap: {
+    flex: 1,
+  },
+  mainText: {
+    color: "#22364E",
+    fontSize: 16,
+    fontWeight: "800",
+    lineHeight: 24,
+  },
+  subText: {
+    marginTop: 6,
+    color: "#788AA0",
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  amountText: {
+    marginTop: 18,
+    color: "#4D7CFE",
+    fontSize: 24,
+    fontWeight: "800",
+  },
 });

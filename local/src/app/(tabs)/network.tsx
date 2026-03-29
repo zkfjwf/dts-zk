@@ -22,7 +22,7 @@ export default function NetworkTestPage() {
       const data = await response.json();
       setHttpResponse(JSON.stringify(data));
     } catch (error) {
-      setHttpResponse(`HTTP 请求失败: ${String(error)}`);
+      setHttpResponse(`HTTP 请求失败：${String(error)}`);
     }
   };
 
@@ -33,8 +33,8 @@ export default function NetworkTestPage() {
     }
 
     if (wsRef.current) {
-      wsRef.current.send("Hello from Expo!");
-      setWsMessages((prev) => [...prev, "-> 发送: Hello from Expo!"]);
+      wsRef.current.send("来自 Expo 的问候");
+      setWsMessages((prev) => [...prev, "-> 已发送：来自 Expo 的问候"]);
       return;
     }
 
@@ -43,11 +43,11 @@ export default function NetworkTestPage() {
 
     ws.onopen = () => {
       setWsMessages((prev) => [...prev, "WebSocket 已连接"]);
-      ws.send("Hello server, I am connected!");
+      ws.send("你好，服务器，我已经连接成功。");
     };
 
     ws.onmessage = (event) => {
-      setWsMessages((prev) => [...prev, `<- 收到: ${event.data}`]);
+      setWsMessages((prev) => [...prev, `<- 收到：${event.data}`]);
     };
 
     ws.onerror = () => {
@@ -71,22 +71,24 @@ export default function NetworkTestPage() {
       <Text style={styles.title}>网络连接测试</Text>
 
       <View style={styles.section}>
-        <Button title="测试 HTTP (GET /hello)" onPress={testHttp} />
-        <Text style={styles.resultText}>HTTP 结果: {httpResponse}</Text>
+        <Button title="测试 HTTP（GET /hello）" onPress={testHttp} />
+        <Text style={styles.resultText}>HTTP 结果：{httpResponse}</Text>
       </View>
 
       <View style={styles.section}>
         <Button
-          title={wsRef.current ? "发送 WS 消息" : "连接 WebSocket 并发送"}
+          title={
+            wsRef.current ? "发送一条 WS 消息" : "连接 WebSocket 并发送消息"
+          }
           onPress={testWs}
           color="#007AFF"
         />
         <Button
-          title="断开 WS"
+          title="断开 WebSocket"
           onPress={() => wsRef.current?.close()}
           color="#FF3B30"
         />
-        <Text style={styles.resultText}>WS 消息记录:</Text>
+        <Text style={styles.resultText}>WS 消息记录：</Text>
         {wsMessages.map((msg, index) => (
           <Text key={index} style={styles.msgText}>
             {msg}

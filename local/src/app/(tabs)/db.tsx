@@ -54,13 +54,15 @@ export default function DatabaseTestScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>WatermelonDB 离线测试</Text>
+      <Text style={styles.title}>离线数据库测试</Text>
       <Text style={styles.subtitle}>当前记录数：{expenses.length}</Text>
-      <Text style={styles.subtitle}>总金额（分）：{total}</Text>
+      <Text style={styles.subtitle}>
+        总金额（元）：{(total / 100).toFixed(2)}
+      </Text>
 
       <View style={styles.btnGroup}>
-        <Button title="记一笔账" onPress={handleAddMockExpense} />
-        <Button title="清空全部" color="red" onPress={handleClearAll} />
+        <Button title="新增一笔账单" onPress={handleAddMockExpense} />
+        <Button title="清空全部记录" color="red" onPress={handleClearAll} />
       </View>
 
       <FlatList
@@ -70,8 +72,8 @@ export default function DatabaseTestScreen() {
           <View style={styles.item}>
             <View>
               <Text style={styles.desc}>{item.description}</Text>
-              <Text style={styles.meta}>payer: {item.payerId}</Text>
-              <Text style={styles.meta}>space: {item.spaceId}</Text>
+              <Text style={styles.meta}>付款人：{item.payerId}</Text>
+              <Text style={styles.meta}>空间：{item.spaceId}</Text>
             </View>
             <Text style={styles.amount}>
               ¥ {(item.amount / 100).toFixed(2)}
