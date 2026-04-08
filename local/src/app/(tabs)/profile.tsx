@@ -25,6 +25,7 @@ import {
 } from "./userDb";
 import { saveImageToAlbum, saveImageToLocalDir } from "@/lib/imageStorage";
 
+// ImagePickerModule 只声明当前页面实际会用到的 Expo 选图接口。
 type ImagePickerModule = {
   launchImageLibraryAsync: (options: Record<string, unknown>) => Promise<{
     canceled: boolean;
@@ -32,6 +33,7 @@ type ImagePickerModule = {
   }>;
 };
 
+// imagePickerModuleCache 缓存一次 require 结果，避免每次点按钮都重复加载模块。
 let imagePickerModuleCache: ImagePickerModule | null | undefined;
 
 // 懒加载图片选择模块，避免测试环境缺少原生模块时报错。
@@ -72,14 +74,20 @@ function Avatar({ uri, name }: { uri: string; name: string }) {
 
 // 个人资料页负责编辑昵称、更新头像，并支持导出头像到系统相册。
 export default function ProfilePage() {
+  // current 是 mock 领域里的当前用户基线信息，作为本地资料缺失时的回退来源。
   const current = useMemo(() => getCurrentUser(), []);
   // profile 是从本地数据库里读取出的规范化用户资料。
   const [profile, setProfile] = useState<UserProfileData | null>(null);
+  // nicknameInput 保存昵称输入框的草稿内容。
   const [nicknameInput, setNicknameInput] = useState("");
+  // savingProfile 避免重复点击保存昵称或头像时触发并发写入。
   const [savingProfile, setSavingProfile] = useState(false);
+  // savingAvatarToAlbum 表示“保存头像到系统相册”动作是否仍在进行中。
   const [savingAvatarToAlbum, setSavingAvatarToAlbum] = useState(false);
 
+  // avatarUri 优先展示本地头像，若没有再回退到远程头像地址。
   const avatarUri = profile?.avatarLocalUri || profile?.avatarRemoteUrl || "";
+  // displayName 让页面标题和头像回退字始终有稳定显示内容。
   const displayName = profile?.nickname || current.username;
 
   // 确保当前用户在本地数据库中存在，并刷新页面表单数据。

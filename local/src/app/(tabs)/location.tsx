@@ -17,6 +17,7 @@ import {
   type SpaceData,
 } from "./mockApp";
 
+// MapPoint 是位置页真正交给 WebView 地图脚本渲染的点位结构。
 type MapPoint = {
   id: string;
   userId: string;
@@ -27,12 +28,14 @@ type MapPoint = {
   isCurrentUser: boolean;
 };
 
+// MapEvent 约定了 WebView 内地图脚本回传给 React Native 宿主的事件类型。
 type MapEvent =
   | { type: "ready" }
   | { type: "warning"; message?: string }
   | { type: "error"; message?: string }
   | { type: "timeout"; message?: string };
 
+// 这是本地 WebView 使用的虚拟页面来源，并不对应真实线上域名。
 const LOCAL_BAIDU_MAP_PAGE_ORIGIN = "https://travel-map.local";
 const LOCAL_BAIDU_MAP_BASE_URL = `${LOCAL_BAIDU_MAP_PAGE_ORIGIN}/`;
 
@@ -385,6 +388,7 @@ function buildLocalMapHtml(ak: string, points: MapPoint[]) {
 }
 
 // 点位变化后强制重建 WebView，保证百度地图脚本重新读取最新数据。
+// buildMapKey 根据点位内容生成稳定 key，用来强制 WebView 在数据变化时重新装载。
 function buildMapKey(space: SpaceData | null) {
   if (!space) {
     return "none";
@@ -413,7 +417,9 @@ export default function LocationPage() {
   const [mapStatus, setMapStatus] = useState<
     "idle" | "loading" | "ready" | "error"
   >("idle");
+  // mapErrorText 保存地图彻底加载失败时要展示给用户的错误文案。
   const [mapErrorText, setMapErrorText] = useState("");
+  // mapWarningText 保存非致命问题，例如部分点位失效或转换失败。
   const [mapWarningText, setMapWarningText] = useState("");
 
   useFocusEffect(
@@ -427,6 +433,7 @@ export default function LocationPage() {
     }, [spaceCode]),
   );
 
+  // mapPoints 会把 mock 位置记录转换成前端地图脚本需要的扁平数据。
   const mapPoints = useMemo<MapPoint[]>(() => {
     if (!space) {
       return [];

@@ -16,14 +16,30 @@ import {
   ensureCurrentUserProfileInDb,
   getCurrentUserProfileFromDb,
 } from "./userDb";
-import { createSpaceForCurrentUser, joinSpaceByCode } from "./mockApp";
+import {
+  createSpaceForCurrentUser,
+  joinSpaceByCode,
+  listJoinedSpacesForCurrentUser,
+  type JoinedSpaceSummary,
+} from "./mockApp";
 
+// HeaderUser 是大厅头部头像按钮真正需要的最小资料结构。
 type HeaderUser = {
   nickname: string;
   avatarUri: string;
 };
 
-// FEATURE_ITEMS 定义大厅页在进入旅行空间前展示的功能卡片。
+// formatLobbyTime 把空间最近更新时间转成大厅里更好扫读的短时间。
+function formatLobbyTime(ts: number) {
+  return new Date(ts).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// FEATURE_ITEMS 是大厅页写死的功能导览卡片，用来快速说明当前旅行空间支持哪些能力。
 const FEATURE_ITEMS = [
   {
     title: "动态记录",
@@ -72,8 +88,12 @@ function HeaderAvatar({
 
 // SpaceLobbyPage 负责在大厅页创建空间或通过口令加入已有空间。
 export default function SpaceLobbyPage() {
+  // spaceCodeInput 保存用户手动输入或刚创建出来的空间口令。
   const [spaceCodeInput, setSpaceCodeInput] = useState("");
+  // latestCreatedCode 用来在创建成功后把最近一次口令回显在大厅页。
   const [latestCreatedCode, setLatestCreatedCode] = useState("");
+  // joinedSpaces 是当前用户仍然属于其中的所有旅行空间摘要。
+  const [joinedSpaces, setJoinedSpaces] = useState<JoinedSpaceSummary[]>([]);
   // headerUser 用本地持久化资料填充头像按钮的昵称和头像。
   const [headerUser, setHeaderUser] = useState<HeaderUser>({
     nickname: "旅行者",
@@ -82,6 +102,7 @@ export default function SpaceLobbyPage() {
 
   useFocusEffect(
     useCallback(() => {
+      // 每次回到大厅都刷新资料和已加入空间，保证跨页面操作后这里仍是最新状态。
       void (async () => {
         await ensureCurrentUserProfileInDb();
         const profile = await getCurrentUserProfileFromDb();
@@ -89,6 +110,7 @@ export default function SpaceLobbyPage() {
           nickname: profile.nickname,
           avatarUri: profile.avatarLocalUri || profile.avatarRemoteUrl || "",
         });
+        setJoinedSpaces(listJoinedSpacesForCurrentUser());
       })();
     }, []),
   );
@@ -97,6 +119,7 @@ export default function SpaceLobbyPage() {
     if (latestCreatedCode) {
       return `最近创建的空间口令：${latestCreatedCode}`;
     }
+    // 默认提示文案提醒用户：创建空间后口令会在这里回显。
     return "创建空间后，这里会显示最近一次生成的口令。";
   }, [latestCreatedCode]);
 
@@ -212,6 +235,48 @@ export default function SpaceLobbyPage() {
             <Text style={styles.helperLabel}>空间提示</Text>
             <Text style={styles.helperText}>{helperText}</Text>
           </View>
+        </View>
+
+        <View style={styles.commandCard}>
+          <View style={styles.commandHeader}>
+            <SoftIconBadge name="albums-outline" tone="mint" size={50} />
+            <View style={styles.commandHeaderTextWrap}>
+              <Text style={styles.commandTitle}>我加入的旅行空间</Text>
+              <Text style={styles.commandSubtitle}>
+                可以从这里随时回到曾经加入过的空间，也可以继续新建和加入新的空间。
+              </Text>
+            </View>
+          </View>
+
+          {joinedSpaces.length === 0 ? (
+            <View style={styles.emptySpacesCard}>
+              <Text style={styles.emptySpacesText}>
+                你还没有加入任何旅行空间，先创建一个或输入口令加入吧。
+              </Text>
+            </View>
+          ) : (
+            joinedSpaces.map((space) => (
+              <Pressable
+                key={space.id}
+                style={styles.joinedSpaceCard}
+                onPress={() => goSpacePage(space.code)}
+              >
+                <View style={styles.joinedSpaceTopRow}>
+                  <View style={styles.joinedSpaceTextWrap}>
+                    <Text style={styles.joinedSpaceName}>{space.name}</Text>
+                    <Text style={styles.joinedSpaceMeta}>
+                      口令：{space.code}
+                    </Text>
+                  </View>
+                  <Text style={styles.joinedSpaceEnter}>进入</Text>
+                </View>
+                <Text style={styles.joinedSpaceInfo}>
+                  {space.memberCount} 位成员 · {space.photoCount} 张图片 ·
+                  最近更新 {formatLobbyTime(space.updatedAt)}
+                </Text>
+              </Pressable>
+            ))
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -430,5 +495,56 @@ const styles = StyleSheet.create({
     color: "#6B809A",
     fontSize: 13,
     lineHeight: 20,
+  },
+  emptySpacesCard: {
+    marginTop: 16,
+    borderRadius: 20,
+    backgroundColor: "#F8FBFF",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  emptySpacesText: {
+    color: "#6B809A",
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  joinedSpaceCard: {
+    marginTop: 14,
+    borderRadius: 20,
+    backgroundColor: "#F8FBFF",
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    borderWidth: 1,
+    borderColor: "#E4EDF8",
+  },
+  joinedSpaceTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  joinedSpaceTextWrap: {
+    flex: 1,
+  },
+  joinedSpaceName: {
+    color: "#203146",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  joinedSpaceMeta: {
+    marginTop: 6,
+    color: "#6E8198",
+    fontSize: 12,
+  },
+  joinedSpaceEnter: {
+    color: "#3565C9",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  joinedSpaceInfo: {
+    marginTop: 10,
+    color: "#7387A0",
+    fontSize: 12,
+    lineHeight: 18,
   },
 });

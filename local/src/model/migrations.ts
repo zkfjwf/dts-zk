@@ -9,6 +9,7 @@ import {
 export default schemaMigrations({
   migrations: [
     {
+      // v2 是最早把账单、图片和动态主表补齐到可用状态的一次升级。
       toVersion: 2,
       steps: [
         addColumns({
@@ -33,6 +34,7 @@ export default schemaMigrations({
       ],
     },
     {
+      // v3 引入早期的 post_comments 表，为旧数据升级保留兼容路径。
       toVersion: 3,
       steps: [
         createTable({
@@ -50,6 +52,7 @@ export default schemaMigrations({
       ],
     },
     {
+      // v4 开始补充用户资料表，让个人信息页有本地持久化落点。
       toVersion: 4,
       steps: [
         createTable({
@@ -66,6 +69,7 @@ export default schemaMigrations({
       ],
     },
     {
+      // v5 按 docs/data-design.md 收敛到当前规范化结构，并清理旧表字段。
       toVersion: 5,
       steps: [
         addColumns({

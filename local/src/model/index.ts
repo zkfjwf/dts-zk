@@ -14,12 +14,14 @@ import Space from "@/model/Space";
 import SpaceMember from "@/model/SpaceMember";
 import User from "@/model/User";
 
+// isTestEnv 用来区分 Jest 测试和真机/模拟器运行环境。
 const isTestEnv = process.env.NODE_ENV === "test";
 // 测试环境使用 LokiJS，应用运行时则在设备上使用 SQLite。
 const adapter = isTestEnv
   ? new LokiJSAdapter({
       schema,
       migrations,
+      // 测试环境里不需要额外 worker，保持配置尽量简单可控。
       useWebWorker: false,
       useIncrementalIndexedDB: false,
     })

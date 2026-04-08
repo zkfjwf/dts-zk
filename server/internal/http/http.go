@@ -8,6 +8,7 @@ import (
 
 // HttpHello 是给 Expo 网络调试页使用的轻量健康检查接口。
 func HttpHello(c *gin.Context) {
+	// 返回固定 JSON，方便前端快速确认 HTTP 通路与序列化链路正常。
 	c.JSON(http.StatusOK, gin.H{
 		"message": "hello http",
 	})

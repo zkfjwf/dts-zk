@@ -19,6 +19,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
   }
 
   await database.write(async () => {
+    // 先拿到每张表对应的 collection，后续所有增量同步都复用这些入口。
     const userCollection = database.collections.get<User>("users");
     const spaceCollection = database.collections.get<Space>("spaces");
     const spaceMemberCollection =
@@ -28,6 +29,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
     const photoCollection = database.collections.get<Photo>("photos");
     const commentCollection = database.collections.get<Comment>("comments");
 
+    // 一次性取出现有记录，再通过 Map 快速判断“更新还是创建”。
     const [
       existingUsers,
       existingSpaces,
@@ -56,6 +58,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
     const photoMap = new Map(existingPhotos.map((item) => [item.id, item]));
     const commentMap = new Map(existingComments.map((item) => [item.id, item]));
 
+    // 用户表优先同步，保证后续关系表和动态表引用到的用户都已存在。
     for (const user of space.users) {
       const existing = userMap.get(user.id);
       if (existing) {
@@ -80,6 +83,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
       userMap.set(created.id, created);
     }
 
+    // 同步空间主记录本身。
     const existingSpace = spaceMap.get(space.space.id);
     if (existingSpace) {
       await existingSpace.update((row) => {
@@ -95,6 +99,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
       spaceMap.set(created.id, created);
     }
 
+    // 再同步成员关系，维护谁属于哪个旅行空间。
     for (const member of space.spaceMembers) {
       const existing = spaceMemberMap.get(member.id);
       if (existing) {
@@ -117,6 +122,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
       spaceMemberMap.set(created.id, created);
     }
 
+    // expenses 进入本地数据库前统一转成“分”，避免金额浮点误差。
     for (const expense of space.expenses) {
       const existing = expenseMap.get(expense.id);
       if (existing) {
@@ -143,6 +149,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
       expenseMap.set(created.id, created);
     }
 
+    // posts 只保存动态主记录；正文文字会在 comments 表里补齐。
     for (const post of space.posts) {
       const existing = postMap.get(post.id);
       if (existing) {
@@ -163,6 +170,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
       postMap.set(created.id, created);
     }
 
+    // photos 独立同步，后续成员协作增删图片会直接依赖这张表。
     for (const photo of space.photos) {
       const existing = photoMap.get(photo.id);
       if (existing) {
@@ -193,6 +201,7 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
       photoMap.set(created.id, created);
     }
 
+    // comments 最后同步，确保关联的 post 已经存在。
     for (const comment of space.comments) {
       const existing = commentMap.get(comment.id);
       if (existing) {
@@ -220,5 +229,6 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
     }
   });
 
+  // 只有整次同步成功后才标记已同步，避免半途中断后无法重试。
   syncedSpaceIds.add(space.id);
 }

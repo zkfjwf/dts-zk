@@ -170,6 +170,15 @@ export type SpaceData = {
 
 export type TeamData = SpaceData;
 
+export type JoinedSpaceSummary = {
+  id: string;
+  code: string;
+  name: string;
+  memberCount: number;
+  photoCount: number;
+  updatedAt: number;
+};
+
 type JoinResult =
   | { ok: true; space: SpaceData }
   | { ok: false; message: string };
@@ -178,18 +187,21 @@ type LeaveResult =
   | { ok: true; space: SpaceData | null; message: string }
   | { ok: false; message: string };
 
+// MEMBER_AVATARS 是 mock 成员的固定头像素材，便于反复创建空间时保持角色辨识度。
 const MEMBER_AVATARS: Record<string, string> = {
   me: "https://i.pravatar.cc/200?img=11",
   xiaoli: "https://i.pravatar.cc/200?img=48",
   ajun: "https://i.pravatar.cc/200?img=13",
 };
 
+// MEMBER_IDS 为示例成员提前生成稳定主键，避免同一角色在不同结构里 id 不一致。
 const MEMBER_IDS = {
   me: createId(),
   xiaoli: createId(),
   ajun: createId(),
 };
 
+// CURRENT_USER 表示当前 mock 流程里始终扮演“我”的默认旅行者资料。
 const CURRENT_USER: UserProfile = {
   id: MEMBER_IDS.me,
   username: "旅行者小王",
@@ -198,6 +210,7 @@ const CURRENT_USER: UserProfile = {
   nickname: "小王",
 };
 
+// SAMPLE_IMAGES 是初始化动态时随机抽取的默认风景图素材池。
 const SAMPLE_IMAGES = [
   "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=1200",
   "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1200",
@@ -205,6 +218,7 @@ const SAMPLE_IMAGES = [
   "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1200",
 ];
 
+// SAMPLE_TEXTS 是构造示例动态正文时复用的简短旅行文案。
 const SAMPLE_TEXTS = [
   "我们到达酒店并顺利办理入住。",
   "今天在本地市场吃到了很好吃的食物。",
@@ -212,6 +226,7 @@ const SAMPLE_TEXTS = [
   "晚饭后沿河散步很舒服。",
 ];
 
+// 这组范围限定了 mock 位置共享的坐标边界，保证测试点位落在同一片区域内。
 const LAT_MIN = 31.215;
 const LAT_MAX = 31.24;
 const LON_MIN = 121.455;
@@ -220,10 +235,12 @@ const LON_MAX = 121.485;
 // spaces 是服务端同步尚未接入前，前端内存里的 mock 真值源。
 const spaces = new Map<string, SpaceData>();
 
+// randomImage 从示例图库里随机抽一张，供初始化动态和补图流程复用。
 function randomImage() {
   return SAMPLE_IMAGES[Math.floor(Math.random() * SAMPLE_IMAGES.length)];
 }
 
+// randomText 从示例文案池里随机取一句，模拟真实用户发布动态时的文字。
 function randomText() {
   return SAMPLE_TEXTS[Math.floor(Math.random() * SAMPLE_TEXTS.length)];
 }
@@ -379,10 +396,13 @@ export function updateCurrentUserProfile(next: {
 
 // createSpaceForCurrentUser 会为当前用户初始化一个包含成员、动态、账单和位置的示例空间。
 export function createSpaceForCurrentUser() {
+  // createdAt 作为这次初始化的统一基准时间，方便后续排序和对比更新。
   const createdAt = nowTimestamp();
   const spaceId = createId();
+  // 当前 mock 阶段直接复用空间 id 作为口令，后续接服务端后可切换成独立邀请码。
   const code = spaceId;
 
+  // 先构造三位默认成员的规范化用户行数据。
   const currentUserRow = createUserRow(
     CURRENT_USER.id,
     CURRENT_USER.username,
@@ -402,6 +422,7 @@ export function createSpaceForCurrentUser() {
     createdAt,
   );
 
+  // spaceRow 对应 docs/data-design.md 中 `spaces` 表的一条主记录。
   const spaceRow: SpaceRow = {
     id: spaceId,
     name: "春日旅行空间",
@@ -409,6 +430,7 @@ export function createSpaceForCurrentUser() {
     updated_at: createdAt,
   };
 
+  // spaceMembers 模拟当前空间里三位旅伴都已加入的成员关系。
   const spaceMembers: SpaceMemberRow[] = [
     {
       id: createSpaceMemberId(spaceId, CURRENT_USER.id),
@@ -436,6 +458,7 @@ export function createSpaceForCurrentUser() {
     },
   ];
 
+  // 第一条动态模拟刚刚发布的旅行照片，并配两张图方便验证多图布局。
   const firstPostCreatedAt = createdAt;
   const firstPostId = createId();
   const firstCaption = randomText();
@@ -454,6 +477,7 @@ export function createSpaceForCurrentUser() {
     firstPostCreatedAt + 60_000,
   );
 
+  // 第二条动态模拟更早的一条通知型内容，便于验证时间排序和评论回显。
   const secondPostCreatedAt = createdAt - 60 * 60 * 1000;
   const secondPostId = createId();
   const secondCaption = "明天早上 8 点酒店大堂集合。";
@@ -465,6 +489,7 @@ export function createSpaceForCurrentUser() {
     secondPostCreatedAt,
   );
 
+  // posts 只保存动态主记录，正文文字会放进 comments 里作为首条评论。
   const posts: PostRow[] = [
     {
       id: firstPostId,
@@ -482,6 +507,7 @@ export function createSpaceForCurrentUser() {
     },
   ];
 
+  // comments 既包含动态正文，也包含成员后续回复。
   const comments: CommentRow[] = [
     createComment(
       firstPostId,
@@ -503,6 +529,7 @@ export function createSpaceForCurrentUser() {
     ),
   ];
 
+  // SpaceData 是前端当前阶段的聚合读取模型，方便页面一次拿到整段旅行上下文。
   const space: SpaceData = {
     id: spaceId,
     name: spaceRow.name,
@@ -511,6 +538,7 @@ export function createSpaceForCurrentUser() {
     users: [currentUserRow, xiaoliRow, ajunRow],
     spaceMembers,
     photos: [firstPhotoA, firstPhotoB, secondPhoto],
+    // 这里的 amount 继续沿用 mock 层“元”为单位的旧约定，落库时会转成“分”。
     expenses: [
       {
         id: createId(),
@@ -535,6 +563,7 @@ export function createSpaceForCurrentUser() {
     ],
     comments,
     posts,
+    // locations 提供初始地图点位，保证位置页一打开就能看到旅伴分布。
     locations: [
       {
         id: createId(),
@@ -592,6 +621,7 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
   }
 
   const joinedAt = nowTimestamp();
+  // existingMember 代表“重新加入曾经离开的空间”时要恢复的成员关系记录。
   const existingMember = space.spaceMembers.find(
     (item) => item.user_id === CURRENT_USER.id,
   );
@@ -610,6 +640,7 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
     });
   }
 
+  // existingUser 负责同步当前用户最新昵称和头像，避免老空间里显示过时资料。
   const existingUser = space.users.find((user) => user.id === CURRENT_USER.id);
   if (existingUser) {
     const avatarFields = toAvatarFields(CURRENT_USER.avatarUrl);
@@ -629,6 +660,7 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
     );
   }
 
+  // existingLocation 用来决定是恢复旧位置还是新建当前位置共享记录。
   const existingLocation = space.locations.find(
     (item) => item.user_id === CURRENT_USER.id,
   );
@@ -704,6 +736,32 @@ export function getSpaceByCode(inputCode: string) {
   return space ? cloneSpace(space) : null;
 }
 
+// listJoinedSpacesForCurrentUser 返回当前用户仍然属于其中的所有旅行空间摘要。
+export function listJoinedSpacesForCurrentUser(): JoinedSpaceSummary[] {
+  return Array.from(spaces.values())
+    .filter((space) =>
+      space.spaceMembers.some(
+        (item) => item.user_id === CURRENT_USER.id && !item.deleted_at,
+      ),
+    )
+    .map((space) => ({
+      id: space.id,
+      code: space.code,
+      name: space.name,
+      memberCount: activeMemberCount(space),
+      photoCount: space.photos.filter((item) => !item.deleted_at).length,
+      updatedAt: Math.max(
+        space.space.updated_at,
+        ...space.posts.map((item) => item.updated_at),
+        ...space.comments.map((item) => item.updated_at),
+        ...space.photos.map((item) => item.updated_at),
+        ...space.expenses.map((item) => item.updated_at),
+      ),
+    }))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .map((item) => ({ ...item }));
+}
+
 // addPostToSpace 会向 mock 空间追加一条新动态及其配图记录。
 export function addPostToSpace(
   inputCode: string,
@@ -728,6 +786,7 @@ export function addPostToSpace(
 
   const createdAt = nowTimestamp();
   const postId = createId();
+  // 每张图片都映射成独立 photo 记录，便于后续成员共同增删图片。
   const photos = cleanImages.map((uri, index) =>
     createPhoto(space.id, CURRENT_USER.id, postId, uri, createdAt + index),
   );
@@ -774,6 +833,7 @@ export function addCommentToPost(
   }
 
   const commentedAt = nowTimestamp();
+  // 同时更新父动态的 updated_at，保证最新评论会推动动态排序。
   space.comments.push(
     createComment(postId, CURRENT_USER.id, content, commentedAt),
   );
@@ -803,6 +863,7 @@ export function addExpenseToSpace(
   }
 
   const createdAt = nowTimestamp();
+  // mock 账单层当前仍以“元”为单位，进入 WatermelonDB 时会统一转换成“分”。
   space.expenses.unshift({
     id: createId(),
     space_id: space.id,
@@ -858,6 +919,7 @@ export function createTeamForCurrentUser() {
   return createSpaceForCurrentUser();
 }
 
+// joinTeamByCode 是保留给旧页面命名的兼容封装，内部已切到 space 语义。
 export function joinTeamByCode(inputCode: string) {
   const result = joinSpaceByCode(inputCode);
   if (!result.ok) {
@@ -866,6 +928,7 @@ export function joinTeamByCode(inputCode: string) {
   return { ok: true as const, team: result.space };
 }
 
+// leaveTeamByCode 同样保留旧命名，避免页面逐步迁移时一次性改动过大。
 export function leaveTeamByCode(inputCode: string) {
   const result = leaveSpaceByCode(inputCode);
   if (!result.ok) {
@@ -878,6 +941,7 @@ export function getTeamByCode(inputCode: string) {
   return getSpaceByCode(inputCode);
 }
 
+// addPostToTeam 继续对外暴露旧接口名，内部委托给新的 addPostToSpace。
 export function addPostToTeam(
   inputCode: string,
   text: string,
@@ -890,6 +954,7 @@ export function addPostToTeam(
   return { ok: true as const, team: result.space };
 }
 
+// addExpenseToTeam 兼容旧记账入口，避免页面侧立即重命名全部调用点。
 export function addExpenseToTeam(
   inputCode: string,
   title: string,
@@ -906,6 +971,7 @@ export function disbandTeamByCode(inputCode: string) {
   return disbandSpaceByCode(inputCode);
 }
 
+// getDisplayAvatarForUser 返回页面应优先展示的头像地址，兼容本地和远程两种来源。
 export function getDisplayAvatarForUser(user: UserRow) {
   return getUserAvatarUri(user);
 }

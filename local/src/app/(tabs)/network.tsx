@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, ScrollView, StyleSheet, Text, View } from "react-native";
 
+// HTTP_URL 来自 Expo 环境变量，指向本地 Go 服务的调试地址。
 const HTTP_URL = process.env.EXPO_PUBLIC_API_URL;
 const HELLO_API = HTTP_URL ? `${HTTP_URL}/hello` : "";
 const WS_URL = HTTP_URL ? `${HTTP_URL}/ws` : "";
 
 // NetworkTestPage 用来在 Expo 里手动验证 Go 服务的 HTTP 和 WebSocket 接口。
 export default function NetworkTestPage() {
+  // httpResponse 保存最近一次 HTTP 健康检查的展示文本。
   const [httpResponse, setHttpResponse] = useState("");
+  // wsMessages 按时间顺序记录当前会话里的 WebSocket 收发日志。
   const [wsMessages, setWsMessages] = useState<string[]>([]);
   // wsRef 保存当前活动连接，方便页面复用并在退出时安全关闭。
   const wsRef = useRef<WebSocket | null>(null);

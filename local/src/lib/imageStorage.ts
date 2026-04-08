@@ -1,6 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 
+// DEFAULT_IMAGE_EXT 是无法从地址判断扩展名时使用的兜底后缀。
 const DEFAULT_IMAGE_EXT = ".jpg";
 
 // 判断传入地址是否仍然是远程图片链接。
@@ -8,12 +9,14 @@ export function isRemoteImageUri(uri: string) {
   return /^https?:\/\//i.test(uri);
 }
 
+// getFileExt 尝试从图片地址末尾提取扩展名，查询串和 hash 会被忽略。
 function getFileExt(uri: string) {
   const cleanUri = uri.split("?")[0].split("#")[0];
   const match = cleanUri.match(/\.([a-zA-Z0-9]{2,8})$/);
   return match ? `.${match[1].toLowerCase()}` : DEFAULT_IMAGE_EXT;
 }
 
+// ensureDir 会在写文件前确保目标目录已经存在。
 async function ensureDir(targetDir: string) {
   const dirInfo = await FileSystem.getInfoAsync(targetDir);
   if (!dirInfo.exists) {
@@ -49,6 +52,7 @@ export async function saveImageToLocalDir(uri: string, folderName: string) {
   }
 }
 
+// ensureAlbumPermission 专门处理系统相册权限，不把权限细节泄露给页面层。
 async function ensureAlbumPermission() {
   const currentPermission = await MediaLibrary.getPermissionsAsync();
   if (currentPermission.granted) {

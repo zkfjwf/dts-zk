@@ -7,9 +7,11 @@ import (
 )
 
 type Config struct {
+	// Port 是 Gin 开发服务对外监听的端口。
 	Port int `mapstructure:"port"`
 }
 
+// GlobalConfig 保存当前进程初始化完成后的全局配置快照。
 var GlobalConfig Config
 
 // InitConfig 读取 YAML 配置和环境变量覆盖项，并写入全局共享配置。

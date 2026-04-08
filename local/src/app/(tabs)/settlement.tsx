@@ -15,11 +15,13 @@ import Expense from "@/model/Expense";
 import { syncMockSpaceToDatabase } from "./dbSync";
 import { getSpaceByCode, type SpaceData } from "./mockApp";
 
+// LedgerExpense 是结算算法真正需要的最小账单信息。
 type LedgerExpense = {
   amountYuan: number;
   payerId: string;
 };
 
+// Settlement 描述一笔最终需要执行的转账路径。
 type Settlement = {
   fromId: string;
   toId: string;
@@ -35,6 +37,7 @@ function calcSettlements(
     return [];
   }
 
+  // paid 先汇总每位成员实际垫付了多少钱。
   const paid: Record<string, number> = {};
   memberIds.forEach((memberId) => {
     paid[memberId] = 0;
@@ -45,6 +48,7 @@ function calcSettlements(
     paid[expense.payerId] = (paid[expense.payerId] ?? 0) + expense.amountYuan;
   });
 
+  // share 是所有成员理论上应当平均承担的金额。
   const share = total / memberIds.length;
   const creditors: { user: string; amount: number }[] = [];
   const debtors: { user: string; amount: number }[] = [];
@@ -93,9 +97,11 @@ export default function SettlementPage() {
   const { code } = useLocalSearchParams<{ code?: string }>();
   const spaceCode = typeof code === "string" ? code : "";
 
+  // space 保存当前旅行空间快照，用来拿成员关系和用户昵称。
   const [space, setSpace] = useState<SpaceData | null>(() =>
     spaceCode ? getSpaceByCode(spaceCode) : null,
   );
+  // dbExpenses 是从本地数据库读取出的结算输入数据。
   const [dbExpenses, setDbExpenses] = useState<LedgerExpense[]>([]);
 
   // loadDbExpenses 读取规范化账单数据，供结算算法计算使用。
@@ -136,6 +142,7 @@ export default function SettlementPage() {
     }, [spaceCode, loadDbExpenses]),
   );
 
+  // settlements 是经算法压缩后的最少转账方案。
   const settlements = useMemo(() => {
     if (!space) {
       return [];
@@ -147,11 +154,13 @@ export default function SettlementPage() {
     return calcSettlements(memberIds, dbExpenses);
   }, [space, dbExpenses]);
 
+  // totalTransfer 方便页面顶部快速展示总共需要转账多少金额。
   const totalTransfer = useMemo(
     () => settlements.reduce((sum, item) => sum + item.amount, 0),
     [settlements],
   );
 
+  // memberUsers 用来把结算结果里的用户 id 映射回可读昵称。
   const memberUsers = useMemo(() => {
     if (!space) {
       return [];

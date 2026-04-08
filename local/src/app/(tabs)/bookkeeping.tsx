@@ -19,6 +19,7 @@ import { assignModelId, dateToTimestamp } from "@/lib/watermelon";
 import { syncMockSpaceToDatabase } from "./dbSync";
 import { getCurrentUser, getSpaceByCode, type SpaceData } from "./mockApp";
 
+// LedgerExpense 是账单页渲染用的轻量视图模型，金额已经提前换算成“元”。
 type LedgerExpense = {
   id: string;
   amountYuan: number;
@@ -54,7 +55,9 @@ export default function BookkeepingPage() {
   );
   // dbExpenses 保存从本地数据库读取并整理后的账单列表。
   const [dbExpenses, setDbExpenses] = useState<LedgerExpense[]>([]);
+  // title 保存待新增账单的项目名称输入。
   const [title, setTitle] = useState("");
+  // amount 保存待新增账单的金额输入，保持字符串可避免输入中的中间态被截断。
   const [amount, setAmount] = useState("");
 
   // loadDbExpenses 会按当前空间重新加载本地账单数据。
@@ -103,6 +106,7 @@ export default function BookkeepingPage() {
     [dbExpenses],
   );
 
+  // memberUsers 只保留当前空间中仍处于活跃状态的成员资料。
   const memberUsers = useMemo(() => {
     if (!space) {
       return [];
@@ -119,6 +123,7 @@ export default function BookkeepingPage() {
     );
   }, [space]);
 
+  // userNameById 让账单列表能用 payerId 快速映射出昵称。
   const userNameById = useMemo(
     () =>
       new Map(
@@ -127,6 +132,7 @@ export default function BookkeepingPage() {
     [memberUsers],
   );
 
+  // summary 汇总总支出和人均支出，供顶部统计卡片展示。
   const summary = useMemo(() => {
     const total = allExpenses.reduce((acc, item) => acc + item.amountYuan, 0);
     const avg = memberUsers.length ? total / memberUsers.length : 0;
@@ -150,6 +156,7 @@ export default function BookkeepingPage() {
       return;
     }
 
+    // amountInCent 把输入的“元”转换为数据库约定的“分”。
     const amountInCent = Math.round(parsed * 100);
     await database.write(async () => {
       const collection = database.collections.get<Expense>("expenses");

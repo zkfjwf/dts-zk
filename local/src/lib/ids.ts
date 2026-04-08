@@ -1,4 +1,6 @@
+// ULID_ALPHABET 使用 Crockford Base32 字符集，去掉了易混淆字符。
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+// ULID_REGEX 用来校验邀请码和业务主键是否满足 ULID 规范。
 const ULID_REGEX = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 // randomChar 负责从 Crockford Base32 字符表里随机取一个字符。
@@ -7,6 +9,7 @@ function randomChar() {
 }
 
 // encodeTime 把毫秒时间戳前缀编码成 Crockford Base32。
+// value 是原始时间戳，len 表示最终输出长度。
 function encodeTime(value: number, len: number) {
   let out = "";
   let v = Math.floor(value);

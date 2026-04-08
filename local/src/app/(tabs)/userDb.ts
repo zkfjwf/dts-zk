@@ -8,10 +8,15 @@ import {
 } from "./mockApp";
 
 export type UserProfileData = {
+  // id 与 mock/current user 的业务主键保持一致，便于跨层同步。
   id: string;
+  // nickname 是大厅、动态、位置页等场景统一展示的昵称。
   nickname: string;
+  // avatarLocalUri 指向用户从相册选中后复制进沙盒的头像文件。
   avatarLocalUri: string;
+  // avatarRemoteUrl 保存一个可回退使用的线上头像地址。
   avatarRemoteUrl: string;
+  // deletedAt 预留给未来同步删除或注销场景。
   deletedAt: number | null;
 };
 
@@ -55,6 +60,7 @@ export async function ensureCurrentUserProfileInDb() {
     return toData(existed);
   }
 
+  // seed 是首次落库时使用的默认资料快照。
   const seed = toSeed(current);
   let created: User | null = null;
   await database.write(async () => {
@@ -83,6 +89,7 @@ export async function getCurrentUserProfileFromDb() {
 
 // updateCurrentUserNicknameInDb 持久化新昵称，并同步映射到 mock 空间数据里。
 export async function updateCurrentUserNicknameInDb(nickname: string) {
+  // clean 统一去掉首尾空白，避免出现“看不见”的空格昵称。
   const clean = nickname.trim();
   if (!clean) {
     return getCurrentUserProfileFromDb();

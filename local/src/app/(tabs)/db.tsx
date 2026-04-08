@@ -5,12 +5,14 @@ import Expense from "@/model/Expense";
 import { createUlid } from "@/lib/ids";
 import { assignModelId } from "@/lib/watermelon";
 
+// 这几组常量都是数据库冒烟测试页专用的假数据，不参与正式业务流程。
 const DEMO_SPACE_ID = "demo_space_001";
 const DEMO_PAYERS = ["user_a", "user_b", "user_c"];
 const DEMO_EXPENSES = ["酒店", "打车", "晚餐", "门票", "咖啡"];
 
 // DatabaseTestScreen 是一个轻量的 WatermelonDB 手动冒烟测试页。
 export default function DatabaseTestScreen() {
+  // expenses 直接观察 `expenses` 表，方便在测试页实时看到增删结果。
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
   useEffect(() => {
