@@ -14,6 +14,8 @@ import {
 import { SoftIconBadge } from "@/components/SoftIconBadge";
 import { database } from "@/model";
 import Expense from "@/model/Expense";
+import { createUlid } from "@/lib/ids";
+import { assignModelId, dateToTimestamp } from "@/lib/watermelon";
 import { syncMockSpaceToDatabase } from "./dbSync";
 import { getCurrentUser, getSpaceByCode, type SpaceData } from "./mockApp";
 
@@ -21,14 +23,16 @@ type LedgerExpense = {
   id: string;
   amountYuan: number;
   description: string;
-  payerName: string;
+  payerId: string;
   createdAt: number;
 };
 
+// formatAmount 统一账单页里的金额展示格式。
 function formatAmount(amount: number) {
   return `${amount.toFixed(2)} 元`;
 }
 
+// formatDate 把账单时间格式化成更适合旅途场景阅读的短文案。
 function formatDate(ts: number) {
   return new Date(ts).toLocaleString("zh-CN", {
     month: "2-digit",
@@ -38,18 +42,22 @@ function formatDate(ts: number) {
   });
 }
 
+// BookkeepingPage 负责记录账单，并从 WatermelonDB 读回历史数据。
 export default function BookkeepingPage() {
   const { code } = useLocalSearchParams<{ code?: string }>();
   const spaceCode = typeof code === "string" ? code : "";
 
   const currentUser = getCurrentUser();
+  // space 保存当前激活的旅行空间快照，来源于 mock 领域层。
   const [space, setSpace] = useState<SpaceData | null>(() =>
     spaceCode ? getSpaceByCode(spaceCode) : null,
   );
+  // dbExpenses 保存从本地数据库读取并整理后的账单列表。
   const [dbExpenses, setDbExpenses] = useState<LedgerExpense[]>([]);
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
 
+  // loadDbExpenses 会按当前空间重新加载本地账单数据。
   const loadDbExpenses = useCallback(async (spaceId: string) => {
     const collection = database.collections.get<Expense>("expenses");
     const records = await collection
@@ -57,16 +65,15 @@ export default function BookkeepingPage() {
       .fetch();
 
     setDbExpenses(
-      records.map((item) => ({
-        id: item.id,
-        amountYuan: item.amount / 100,
-        description: item.description,
-        payerName: item.payerName || item.payerId || "未知成员",
-        createdAt:
-          item.createdAt instanceof Date
-            ? item.createdAt.getTime()
-            : Date.now(),
-      })),
+      records
+        .filter((item) => !item.deletedAt)
+        .map((item) => ({
+          id: item.id,
+          amountYuan: item.amount / 100,
+          description: item.description,
+          payerId: item.payerId || "",
+          createdAt: dateToTimestamp(item.createdAt),
+        })),
     );
   }, []);
 
@@ -96,12 +103,37 @@ export default function BookkeepingPage() {
     [dbExpenses],
   );
 
+  const memberUsers = useMemo(() => {
+    if (!space) {
+      return [];
+    }
+
+    const memberIds = new Set(
+      space.spaceMembers
+        .filter((item) => !item.deleted_at)
+        .map((item) => item.user_id),
+    );
+
+    return space.users.filter(
+      (user) => !user.deleted_at && memberIds.has(user.id),
+    );
+  }, [space]);
+
+  const userNameById = useMemo(
+    () =>
+      new Map(
+        memberUsers.map((user) => [user.id, user.nickname || "未命名成员"]),
+      ),
+    [memberUsers],
+  );
+
   const summary = useMemo(() => {
     const total = allExpenses.reduce((acc, item) => acc + item.amountYuan, 0);
-    const avg = space?.members.length ? total / space.members.length : 0;
+    const avg = memberUsers.length ? total / memberUsers.length : 0;
     return { total, avg };
-  }, [allExpenses, space]);
+  }, [allExpenses, memberUsers.length]);
 
+  // onAddBill 负责校验表单，并以“分”为单位保存新账单。
   const onAddBill = async () => {
     if (!space) {
       return;
@@ -122,11 +154,12 @@ export default function BookkeepingPage() {
     await database.write(async () => {
       const collection = database.collections.get<Expense>("expenses");
       await collection.create((expense) => {
+        assignModelId(expense, createUlid());
         expense.spaceId = space.id;
         expense.payerId = currentUser.id;
-        expense.payerName = currentUser.username;
         expense.amount = amountInCent;
         expense.description = cleanTitle;
+        expense.deletedAt = null;
       });
     });
 
@@ -135,6 +168,7 @@ export default function BookkeepingPage() {
     setAmount("");
   };
 
+  // onSettle 跳转到同一空间下的结算汇总页。
   const onSettle = () => {
     if (!space) {
       return;
@@ -188,7 +222,7 @@ export default function BookkeepingPage() {
             <View style={styles.summaryHeaderTextWrap}>
               <Text style={styles.summaryTitle}>旅途总览</Text>
               <Text style={styles.summarySubtitle}>
-                {space.name} · {space.members.length} 人同行
+                {space.name} · {memberUsers.length} 人同行
               </Text>
             </View>
           </View>
@@ -309,7 +343,9 @@ export default function BookkeepingPage() {
                     {formatAmount(item.amountYuan)}
                   </Text>
                 </View>
-                <Text style={styles.listMeta}>付款人：{item.payerName}</Text>
+                <Text style={styles.listMeta}>
+                  付款人：{userNameById.get(item.payerId) || "未知成员"}
+                </Text>
                 <Text style={styles.listTime}>
                   {formatDate(item.createdAt)}
                 </Text>

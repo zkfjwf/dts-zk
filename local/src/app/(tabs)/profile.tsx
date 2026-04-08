@@ -1,4 +1,3 @@
-import * as FileSystem from "expo-file-system/legacy";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -24,6 +23,7 @@ import {
   updateCurrentUserNicknameInDb,
   type UserProfileData,
 } from "./userDb";
+import { saveImageToAlbum, saveImageToLocalDir } from "@/lib/imageStorage";
 
 type ImagePickerModule = {
   launchImageLibraryAsync: (options: Record<string, unknown>) => Promise<{
@@ -34,6 +34,7 @@ type ImagePickerModule = {
 
 let imagePickerModuleCache: ImagePickerModule | null | undefined;
 
+// 懒加载图片选择模块，避免测试环境缺少原生模块时报错。
 function getImagePickerModule() {
   if (imagePickerModuleCache !== undefined) {
     return imagePickerModuleCache;
@@ -47,37 +48,7 @@ function getImagePickerModule() {
   return imagePickerModuleCache;
 }
 
-function getFileExt(uri: string) {
-  const clean = uri.split("?")[0].split("#")[0];
-  const match = clean.match(/\.([a-zA-Z0-9]{2,8})$/);
-  return match ? `.${match[1].toLowerCase()}` : ".jpg";
-}
-
-async function ensureDir(targetDir: string) {
-  const info = await FileSystem.getInfoAsync(targetDir);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
-  }
-}
-
-async function saveAvatarToLocal(uri: string) {
-  if (!FileSystem.documentDirectory) {
-    return uri;
-  }
-
-  const baseDir = FileSystem.documentDirectory.endsWith("/")
-    ? FileSystem.documentDirectory
-    : `${FileSystem.documentDirectory}/`;
-  const targetDir = `${baseDir}travel-avatar`;
-  const targetPath = `${targetDir}/${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}${getFileExt(uri)}`;
-
-  await ensureDir(targetDir);
-  await FileSystem.copyAsync({ from: uri, to: targetPath });
-  return targetPath;
-}
-
+// 头像组件优先显示图片，失败时退回到昵称末位字。
 function Avatar({ uri, name }: { uri: string; name: string }) {
   const [loadFailed, setLoadFailed] = useState(false);
   const fallbackText = name.trim().slice(-1) || "旅";
@@ -99,15 +70,19 @@ function Avatar({ uri, name }: { uri: string; name: string }) {
   );
 }
 
+// 个人资料页负责编辑昵称、更新头像，并支持导出头像到系统相册。
 export default function ProfilePage() {
   const current = useMemo(() => getCurrentUser(), []);
+  // profile 是从本地数据库里读取出的规范化用户资料。
   const [profile, setProfile] = useState<UserProfileData | null>(null);
   const [nicknameInput, setNicknameInput] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingAvatarToAlbum, setSavingAvatarToAlbum] = useState(false);
 
   const avatarUri = profile?.avatarLocalUri || profile?.avatarRemoteUrl || "";
   const displayName = profile?.nickname || current.username;
 
+  // 确保当前用户在本地数据库中存在，并刷新页面表单数据。
   const loadProfile = useCallback(async () => {
     await ensureCurrentUserProfileInDb();
     const row = await getCurrentUserProfileFromDb();
@@ -121,6 +96,7 @@ export default function ProfilePage() {
     }, [loadProfile]),
   );
 
+  // 保存昵称时同时同步更新 mock 空间里依赖昵称的展示。
   const onSaveNickname = async () => {
     const clean = nicknameInput.trim();
     if (!clean) {
@@ -128,7 +104,7 @@ export default function ProfilePage() {
       return;
     }
 
-    setSaving(true);
+    setSavingProfile(true);
     try {
       const next = await updateCurrentUserNicknameInDb(clean);
       setProfile(next);
@@ -137,10 +113,11 @@ export default function ProfilePage() {
     } catch (error) {
       Alert.alert("保存失败", String(error));
     } finally {
-      setSaving(false);
+      setSavingProfile(false);
     }
   };
 
+  // 选择头像后先把图片复制进应用沙盒，再更新本地资料记录。
   const onPickAvatar = async () => {
     const imagePicker = getImagePickerModule();
     if (!imagePicker) {
@@ -163,18 +140,39 @@ export default function ProfilePage() {
         return;
       }
 
-      setSaving(true);
-      const localAvatarUri = await saveAvatarToLocal(result.assets[0].uri);
+      setSavingProfile(true);
+      const localAvatarUri = await saveImageToLocalDir(
+        result.assets[0].uri,
+        "travel-avatar",
+      );
       const next = await updateCurrentUserAvatarInDb(localAvatarUri);
       setProfile(next);
       Alert.alert("已保存", "头像已经更新，旅行空间里的动态头像会同步刷新。");
     } catch (error) {
       Alert.alert("头像更新失败", String(error));
     } finally {
-      setSaving(false);
+      setSavingProfile(false);
     }
   };
 
+  // 把当前头像导出到系统相册。
+  const onSaveAvatarToAlbum = async () => {
+    if (!avatarUri) {
+      return;
+    }
+
+    setSavingAvatarToAlbum(true);
+    try {
+      await saveImageToAlbum(avatarUri, "travel-avatar-export");
+      Alert.alert("已保存", "头像已经保存到系统相册。");
+    } catch (error) {
+      Alert.alert("保存失败", String(error));
+    } finally {
+      setSavingAvatarToAlbum(false);
+    }
+  };
+
+  // 优先返回上一级；如果当前没有返回栈，就退回首页。
   const goBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -263,16 +261,14 @@ export default function ProfilePage() {
 
             <Text style={styles.label}>用户账号</Text>
             <View style={styles.valueCard}>
-              <Text style={styles.valueText}>
-                {profile?.userId || current.id}
-              </Text>
+              <Text style={styles.valueText}>{profile?.id || current.id}</Text>
             </View>
 
             <View style={styles.buttonGroup}>
               <Pressable
                 style={styles.secondaryButton}
                 onPress={() => void onPickAvatar()}
-                disabled={saving}
+                disabled={savingProfile || savingAvatarToAlbum}
               >
                 <SoftIconBadge
                   name="camera-outline"
@@ -281,14 +277,30 @@ export default function ProfilePage() {
                   iconSize={18}
                 />
                 <Text style={styles.secondaryButtonText}>
-                  {saving ? "处理中..." : "选择头像"}
+                  {savingProfile ? "处理中..." : "选择头像"}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() => void onSaveAvatarToAlbum()}
+                disabled={!avatarUri || savingProfile || savingAvatarToAlbum}
+              >
+                <SoftIconBadge
+                  name="download-outline"
+                  tone="sky"
+                  size={40}
+                  iconSize={18}
+                />
+                <Text style={styles.secondaryButtonText}>
+                  {savingAvatarToAlbum ? "保存中..." : "保存头像到相册"}
                 </Text>
               </Pressable>
 
               <Pressable
                 style={styles.primaryButton}
                 onPress={() => void onSaveNickname()}
-                disabled={saving}
+                disabled={savingProfile || savingAvatarToAlbum}
               >
                 <SoftIconBadge
                   name="checkmark-outline"
@@ -297,7 +309,7 @@ export default function ProfilePage() {
                   iconSize={18}
                 />
                 <Text style={styles.primaryButtonText}>
-                  {saving ? "保存中..." : "保存资料"}
+                  {savingProfile ? "保存中..." : "保存资料"}
                 </Text>
               </Pressable>
             </View>

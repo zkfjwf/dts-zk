@@ -50,6 +50,7 @@ type SoftIconBadgeProps = {
   iconSize?: number;
 };
 
+// SoftIconBadgeBase 渲染旅行界面里复用的柔和渐变图标徽章。
 function SoftIconBadgeBase({
   name,
   tone = "sky",

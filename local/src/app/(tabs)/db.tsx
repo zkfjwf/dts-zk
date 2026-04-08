@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, FlatList, StyleSheet, Text, View } from "react-native";
 import { database } from "@/model";
 import Expense from "@/model/Expense";
+import { createUlid } from "@/lib/ids";
+import { assignModelId } from "@/lib/watermelon";
 
 const DEMO_SPACE_ID = "demo_space_001";
 const DEMO_PAYERS = ["user_a", "user_b", "user_c"];
 const DEMO_EXPENSES = ["酒店", "打车", "晚餐", "门票", "咖啡"];
 
+// DatabaseTestScreen 是一个轻量的 WatermelonDB 手动冒烟测试页。
 export default function DatabaseTestScreen() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
@@ -25,6 +28,7 @@ export default function DatabaseTestScreen() {
     [expenses],
   );
 
+  // handleAddMockExpense 插入一条随机账单，方便快速检查离线写入是否正常。
   const handleAddMockExpense = async () => {
     const payerId = DEMO_PAYERS[Math.floor(Math.random() * DEMO_PAYERS.length)];
     const description =
@@ -33,14 +37,17 @@ export default function DatabaseTestScreen() {
     await database.write(async () => {
       const collection = database.collections.get<Expense>("expenses");
       await collection.create((expense) => {
+        assignModelId(expense, createUlid());
         expense.spaceId = DEMO_SPACE_ID;
         expense.payerId = payerId;
         expense.amount = Math.floor(Math.random() * 5000) + 1000;
         expense.description = `${description}（离线测试）`;
+        expense.deletedAt = null;
       });
     });
   };
 
+  // handleClearAll 只清空测试数据，不会影响正式业务逻辑。
   const handleClearAll = async () => {
     await database.write(async () => {
       const collection = database.collections.get<Expense>("expenses");

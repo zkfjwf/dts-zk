@@ -23,6 +23,7 @@ type HeaderUser = {
   avatarUri: string;
 };
 
+// FEATURE_ITEMS 定义大厅页在进入旅行空间前展示的功能卡片。
 const FEATURE_ITEMS = [
   {
     title: "动态记录",
@@ -44,6 +45,7 @@ const FEATURE_ITEMS = [
   },
 ];
 
+// HeaderAvatar 负责渲染大厅页右上角的紧凑头像入口。
 function HeaderAvatar({
   avatarUri,
   nickname,
@@ -68,9 +70,11 @@ function HeaderAvatar({
   );
 }
 
+// SpaceLobbyPage 负责在大厅页创建空间或通过口令加入已有空间。
 export default function SpaceLobbyPage() {
   const [spaceCodeInput, setSpaceCodeInput] = useState("");
   const [latestCreatedCode, setLatestCreatedCode] = useState("");
+  // headerUser 用本地持久化资料填充头像按钮的昵称和头像。
   const [headerUser, setHeaderUser] = useState<HeaderUser>({
     nickname: "旅行者",
     avatarUri: "",
@@ -96,10 +100,12 @@ export default function SpaceLobbyPage() {
     return "创建空间后，这里会显示最近一次生成的口令。";
   }, [latestCreatedCode]);
 
+  // goSpacePage 统一处理跳转到当前旅行空间页面的逻辑。
   const goSpacePage = (code: string) => {
     router.push({ pathname: "/team", params: { code } });
   };
 
+  // onCreateSpace 创建一个本地 mock 空间，并立即进入该空间。
   const onCreateSpace = () => {
     const space = createSpaceForCurrentUser();
     setLatestCreatedCode(space.code);
@@ -108,6 +114,7 @@ export default function SpaceLobbyPage() {
     goSpacePage(space.code);
   };
 
+  // onJoinSpace 会先校验口令，再尝试加入 mock 空间。
   const onJoinSpace = () => {
     const result = joinSpaceByCode(spaceCodeInput);
     if (!result.ok) {

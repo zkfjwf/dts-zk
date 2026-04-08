@@ -1,5 +1,4 @@
 import { Q } from "@nozbe/watermelondb";
-import * as FileSystem from "expo-file-system/legacy";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -19,9 +18,20 @@ import {
 } from "react-native";
 import { SoftIconBadge } from "@/components/SoftIconBadge";
 import { database } from "@/model";
+import Comment from "@/model/Comment";
 import Photo from "@/model/Photo";
 import Post from "@/model/Post";
-import PostComment from "@/model/PostComment";
+import { createUlid, nowTimestamp } from "@/lib/ids";
+import {
+  isRemoteImageUri,
+  saveImageToAlbum,
+  saveImageToLocalDir,
+} from "@/lib/imageStorage";
+import {
+  assignModelId,
+  assignTimestamps,
+  dateToTimestamp,
+} from "@/lib/watermelon";
 import { syncMockSpaceToDatabase } from "./dbSync";
 import {
   disbandSpaceByCode,
@@ -43,18 +53,25 @@ type ImagePickerModule = {
   }>;
 };
 
+type FeedComment = {
+  id: string;
+  commenterId: string;
+  text: string;
+  createdAt: number;
+};
+
 type FeedPost = {
   id: string;
-  uploaderId: string;
-  uploaderName: string;
-  text: string;
+  posterId: string;
+  caption: string;
   imageUris: string[];
   createdAt: number;
-  comments: { id: string; author: string; text: string; createdAt: number }[];
+  comments: FeedComment[];
 };
 
 let imagePickerModuleCache: ImagePickerModule | null | undefined;
 
+// 懒加载图片选择模块，避免测试环境缺少原生模块时报错。
 function getImagePickerModule() {
   if (imagePickerModuleCache !== undefined) {
     return imagePickerModuleCache;
@@ -68,6 +85,7 @@ function getImagePickerModule() {
   return imagePickerModuleCache;
 }
 
+// 把时间戳格式化成动态列表里更紧凑的展示文案。
 function formatTime(ts: number) {
   return new Date(ts).toLocaleString("zh-CN", {
     month: "2-digit",
@@ -77,49 +95,7 @@ function formatTime(ts: number) {
   });
 }
 
-function isRemoteUri(uri: string) {
-  return /^https?:\/\//i.test(uri);
-}
-
-function getFileExt(uri: string) {
-  const clean = uri.split("?")[0].split("#")[0];
-  const match = clean.match(/\.([a-zA-Z0-9]{2,8})$/);
-  return match ? `.${match[1].toLowerCase()}` : ".jpg";
-}
-
-async function ensureDir(targetDir: string) {
-  const info = await FileSystem.getInfoAsync(targetDir);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
-  }
-}
-
-async function saveImageToLocalDir(uri: string, folderName: string) {
-  if (!FileSystem.documentDirectory) {
-    return uri;
-  }
-
-  const baseDir = FileSystem.documentDirectory.endsWith("/")
-    ? FileSystem.documentDirectory
-    : `${FileSystem.documentDirectory}/`;
-  const targetDir = `${baseDir}${folderName}`;
-  const targetPath = `${targetDir}/${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}${getFileExt(uri)}`;
-
-  try {
-    await ensureDir(targetDir);
-    if (isRemoteUri(uri) && FileSystem.downloadAsync) {
-      const downloaded = await FileSystem.downloadAsync(uri, targetPath);
-      return downloaded.uri || targetPath;
-    }
-    await FileSystem.copyAsync({ from: uri, to: targetPath });
-    return targetPath;
-  } catch {
-    return uri;
-  }
-}
-
+// 头像组件优先显示图片，失败时退回到昵称末位字。
 function Avatar({ uri, name }: { uri?: string; name: string }) {
   const [failed, setFailed] = useState(false);
   const text = name.trim().slice(-1) || "旅";
@@ -141,6 +117,7 @@ function Avatar({ uri, name }: { uri?: string; name: string }) {
   );
 }
 
+// 动态配图会根据原图宽高比自适应展示尺寸。
 function FeedImage({ uri }: { uri: string }) {
   const [aspectRatio, setAspectRatio] = useState(1);
 
@@ -169,87 +146,101 @@ export default function TeamPage() {
   const spaceCode = typeof code === "string" ? code : "";
   const currentUser = getCurrentUser();
 
+  // space 保存当前行程空间在前端 mock 层里的完整快照。
   const [space, setSpace] = useState<SpaceData | null>(() =>
     spaceCode ? getSpaceByCode(spaceCode) : null,
   );
+  // dbPosts 是由 posts、photos、comments 三张表拼出来的动态视图模型。
   const [dbPosts, setDbPosts] = useState<FeedPost[]>([]);
+  // postText 存储待发布动态的文字内容，落库时会写成首条评论。
   const [postText, setPostText] = useState("");
+  // selectedImageUris 维护当前动态草稿里已选择的全部图片。
   const [selectedImageUris, setSelectedImageUris] = useState<string[]>([]);
+  // commentInputs 以 postId 为键保存每条动态各自的评论草稿。
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>(
     {},
   );
+  // commentingPostId 用来判断当前哪条动态正在输入评论。
   const [commentingPostId, setCommentingPostId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // previewImageUri 不为空时会打开全屏图片预览弹窗。
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const [savingPreview, setSavingPreview] = useState(false);
+  // currentProfile 叠加了本地数据库里的最新用户资料，用来覆盖 mock 当前用户信息。
   const [currentProfile, setCurrentProfile] = useState<UserProfileData | null>(
     null,
   );
 
+  // commentInputRefs 用来在评论提交后主动收起对应输入框。
   const commentInputRefs = useRef<Record<string, { blur?: () => void } | null>>(
     {},
   );
 
+  // 从本地数据库读取动态、图片和评论，并拼装成页面需要的结构。
   const loadDbPosts = useCallback(async (spaceId: string) => {
     const postCollection = database.collections.get<Post>("posts");
     const photoCollection = database.collections.get<Photo>("photos");
-    const commentCollection =
-      database.collections.get<PostComment>("post_comments");
+    const commentCollection = database.collections.get<Comment>("comments");
 
     const [posts, photos, comments] = await Promise.all([
-      postCollection
-        .query(Q.where("space_id", spaceId), Q.sortBy("created_at", Q.desc))
-        .fetch(),
+      postCollection.query(Q.sortBy("created_at", Q.desc)).fetch(),
       photoCollection.query(Q.where("space_id", spaceId)).fetch(),
-      commentCollection
-        .query(Q.where("space_id", spaceId), Q.sortBy("created_at", Q.asc))
-        .fetch(),
+      commentCollection.query(Q.sortBy("commented_at", Q.asc)).fetch(),
     ]);
 
+    const activePostIds = new Set<string>();
     const photoMap = new Map<string, string[]>();
     photos.forEach((item) => {
-      if (!item.postId) {
+      if (item.deletedAt || !item.postId) {
         return;
       }
+
+      activePostIds.add(item.postId);
       const list = photoMap.get(item.postId) ?? [];
-      list.push(item.remoteUrl || item.localPath);
+      list.push(item.remoteUrl || item.localUri);
       photoMap.set(item.postId, Array.from(new Set(list)));
     });
 
-    const commentMap = new Map<
-      string,
-      { id: string; author: string; text: string; createdAt: number }[]
-    >();
+    const commentMap = new Map<string, FeedComment[]>();
     comments.forEach((item) => {
-      if (!item.postId) {
+      if (item.deletedAt || !item.postId || !activePostIds.has(item.postId)) {
         return;
       }
+
       const list = commentMap.get(item.postId) ?? [];
       list.push({
         id: item.id,
-        author: item.authorName || "鎴愬憳",
-        text: item.textContent || "",
-        createdAt:
-          item.createdAt instanceof Date
-            ? item.createdAt.getTime()
-            : Date.now(),
+        commenterId: item.commenterId || "",
+        text: item.content || "",
+        createdAt: dateToTimestamp(item.commentedAt),
       });
       commentMap.set(item.postId, list);
     });
 
     setDbPosts(
-      posts.map((item) => ({
-        id: item.id,
-        uploaderId: item.uploaderId,
-        uploaderName: item.uploaderName || "鎴愬憳",
-        text: item.textContent || "",
-        imageUris: photoMap.get(item.id) ?? [],
-        createdAt:
-          item.createdAt instanceof Date
-            ? item.createdAt.getTime()
-            : Date.now(),
-        comments: commentMap.get(item.id) ?? [],
-      })),
+      posts
+        .filter((item) => !item.deletedAt && activePostIds.has(item.id))
+        .map((item) => {
+          const postCreatedAt = dateToTimestamp(item.createdAt);
+          const rawComments = [...(commentMap.get(item.id) ?? [])].sort(
+            (left, right) => left.createdAt - right.createdAt,
+          );
+          const captionIndex = rawComments.findIndex(
+            (comment) =>
+              comment.commenterId === item.posterId &&
+              // 文案会作为发帖人紧邻创建时间的第一条评论落库。
+              Math.abs(comment.createdAt - postCreatedAt) <= 1_000,
+          );
+
+          return {
+            id: item.id,
+            posterId: item.posterId,
+            caption: captionIndex >= 0 ? rawComments[captionIndex].text : "",
+            imageUris: photoMap.get(item.id) ?? [],
+            createdAt: postCreatedAt,
+            comments: rawComments.filter((_, index) => index !== captionIndex),
+          };
+        }),
     );
   }, []);
 
@@ -283,7 +274,14 @@ export default function TeamPage() {
   const users = useMemo(() => {
     const map = new Map<string, { nickname: string; avatarUrl: string }>();
     for (const user of space?.users ?? []) {
-      map.set(user.id, user);
+      if (user.deleted_at) {
+        continue;
+      }
+
+      map.set(user.id, {
+        nickname: user.nickname,
+        avatarUrl: user.avatar_local_uri || user.avatar_remote_url || "",
+      });
     }
 
     map.set(currentUser.id, {
@@ -304,6 +302,7 @@ export default function TeamPage() {
     space,
   ]);
 
+  // 打开系统相册并把新选中的图片合并到当前草稿里。
   const pickImagesFromAlbum = async () => {
     const imagePicker = getImagePickerModule();
     if (!imagePicker) {
@@ -336,10 +335,12 @@ export default function TeamPage() {
     }
   };
 
+  // 从当前草稿中移除一张已选图片。
   const removeSelectedImage = (uri: string) => {
     setSelectedImageUris((prev) => prev.filter((item) => item !== uri));
   };
 
+  // 发布动态时会先写 post，再写图片，最后把文案写成首条评论。
   const onPublishPost = async () => {
     if (!space) {
       return;
@@ -348,17 +349,24 @@ export default function TeamPage() {
     const cleanText = postText.trim();
     const mergedInputUris = Array.from(new Set(selectedImageUris));
 
-    if (!cleanText && mergedInputUris.length === 0) {
-      Alert.alert("发布失败", "请填写文字或至少选择一张图片。");
+    if (mergedInputUris.length === 0) {
+      Alert.alert(
+        "发布失败",
+        "根据当前数据结构，动态至少需要一张图片来归属到旅行空间。",
+      );
       return;
     }
 
+    const createdAt = nowTimestamp();
+    const postId = createUlid();
     const preparedImages = await Promise.all(
-      mergedInputUris.map(async (uri) => {
+      mergedInputUris.map(async (uri, index) => {
         const localPath = await saveImageToLocalDir(uri, "travel-post-images");
         return {
-          localPath,
-          remoteUrl: isRemoteUri(uri) ? uri : "",
+          id: createUlid(),
+          localUri: localPath,
+          remoteUrl: isRemoteImageUri(uri) ? uri : "",
+          shotedAt: createdAt + index,
         };
       }),
     );
@@ -366,23 +374,38 @@ export default function TeamPage() {
     await database.write(async () => {
       const postCollection = database.collections.get<Post>("posts");
       const photoCollection = database.collections.get<Photo>("photos");
+      const commentCollection = database.collections.get<Comment>("comments");
 
-      let createdPostId = "";
       await postCollection.create((post) => {
-        post.spaceId = space.id;
-        post.uploaderId = currentUser.id;
-        post.uploaderName = currentProfile?.nickname || currentUser.username;
-        post.textContent = cleanText;
-        createdPostId = post.id;
+        assignModelId(post, postId);
+        post.posterId = currentUser.id;
+        post.deletedAt = null;
+        assignTimestamps(post, createdAt, createdAt);
       });
 
       for (const image of preparedImages) {
         await photoCollection.create((photo) => {
+          assignModelId(photo, image.id);
           photo.spaceId = space.id;
-          photo.postId = createdPostId;
+          photo.postId = postId;
           photo.uploaderId = currentUser.id;
-          photo.localPath = image.localPath;
+          photo.localUri = image.localUri;
           photo.remoteUrl = image.remoteUrl;
+          photo.shotedAt = new Date(image.shotedAt);
+          photo.deletedAt = null;
+          assignTimestamps(photo, image.shotedAt, image.shotedAt);
+        });
+      }
+
+      if (cleanText) {
+        await commentCollection.create((item) => {
+          assignModelId(item, createUlid());
+          item.content = cleanText;
+          item.commenterId = currentUser.id;
+          item.postId = postId;
+          item.commentedAt = new Date(createdAt);
+          item.deletedAt = null;
+          assignTimestamps(item, createdAt, createdAt);
         });
       }
     });
@@ -392,6 +415,7 @@ export default function TeamPage() {
     setSelectedImageUris([]);
   };
 
+  // 发表评论后刷新当前动态列表。
   const onComment = async (postId: string) => {
     if (!space) {
       return;
@@ -407,14 +431,17 @@ export default function TeamPage() {
     Keyboard.dismiss();
     setCommentingPostId(null);
 
+    const commentedAt = nowTimestamp();
     await database.write(async () => {
-      const collection = database.collections.get<PostComment>("post_comments");
+      const collection = database.collections.get<Comment>("comments");
       await collection.create((item) => {
-        item.spaceId = space.id;
+        assignModelId(item, createUlid());
+        item.content = content;
+        item.commenterId = currentUser.id;
         item.postId = postId;
-        item.authorId = currentUser.id;
-        item.authorName = currentProfile?.nickname || currentUser.username;
-        item.textContent = content;
+        item.commentedAt = new Date(commentedAt);
+        item.deletedAt = null;
+        assignTimestamps(item, commentedAt, commentedAt);
       });
     });
 
@@ -422,6 +449,7 @@ export default function TeamPage() {
     await loadDbPosts(space.id);
   };
 
+  // 把当前预览中的图片保存到系统相册。
   const onSavePreviewImage = async () => {
     if (!previewImageUri) {
       return;
@@ -429,8 +457,8 @@ export default function TeamPage() {
 
     setSavingPreview(true);
     try {
-      await saveImageToLocalDir(previewImageUri, "travel-saved-images");
-      Alert.alert("已保存", "图片已经保存到应用本地。");
+      await saveImageToAlbum(previewImageUri, "travel-saved-images");
+      Alert.alert("保存成功", "图片已经保存到系统相册。");
     } catch (error) {
       Alert.alert("保存失败", String(error));
     } finally {
@@ -438,6 +466,7 @@ export default function TeamPage() {
     }
   };
 
+  // 退出当前行程空间。
   const onLeave = () => {
     setMenuOpen(false);
     if (!spaceCode) {
@@ -452,6 +481,7 @@ export default function TeamPage() {
     router.replace("/");
   };
 
+  // 解散当前行程空间。
   const onDisband = () => {
     setMenuOpen(false);
     if (!spaceCode) {
@@ -597,8 +627,8 @@ export default function TeamPage() {
             ) : null}
 
             {dbPosts.map((post) => {
-              const author = users.get(post.uploaderId);
-              const authorName = author?.nickname || post.uploaderName;
+              const author = users.get(post.posterId);
+              const authorName = author?.nickname || "成员";
               const authorAvatar = author?.avatarUrl;
 
               return (
@@ -613,8 +643,8 @@ export default function TeamPage() {
                     </View>
                   </View>
 
-                  {post.text ? (
-                    <Text style={styles.postText}>{post.text}</Text>
+                  {post.caption ? (
+                    <Text style={styles.postText}>{post.caption}</Text>
                   ) : null}
 
                   {post.imageUris.length > 0 ? (
@@ -640,7 +670,7 @@ export default function TeamPage() {
                       post.comments.map((comment) => (
                         <View key={comment.id} style={styles.commentItem}>
                           <Text style={styles.commentAuthor}>
-                            {comment.author}
+                            {users.get(comment.commenterId)?.nickname || "成员"}
                           </Text>
                           <Text style={styles.commentText}>{comment.text}</Text>
                         </View>
@@ -700,6 +730,10 @@ export default function TeamPage() {
               >
                 <Text style={styles.pickImageBtnText}>选择图片</Text>
               </Pressable>
+
+              <Text style={styles.selectedHint}>
+                当前数据库设计会把文字作为动态说明评论保存，发布时至少需要一张图片。
+              </Text>
 
               {selectedImageUris.length > 0 ? (
                 <>
@@ -763,7 +797,7 @@ export default function TeamPage() {
             onPress={() => void onSavePreviewImage()}
           >
             <Text style={styles.previewSaveBtnText}>
-              {savingPreview ? "保存中..." : "保存到应用内"}
+              {savingPreview ? "保存中..." : "保存到系统相册"}
             </Text>
           </Pressable>
         </View>

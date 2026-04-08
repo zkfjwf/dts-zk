@@ -1,63 +1,68 @@
-const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const ULID_REGEX = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+import { createUlid, isUlid, nowTimestamp } from "@/lib/ids";
 
-function randomChar() {
-  return ULID_ALPHABET[Math.floor(Math.random() * ULID_ALPHABET.length)];
-}
-
-function encodeTime(value: number, len: number) {
-  let out = "";
-  let v = Math.floor(value);
-  for (let i = len - 1; i >= 0; i -= 1) {
-    out = ULID_ALPHABET[v % 32] + out;
-    v = Math.floor(v / 32);
-  }
-  return out;
-}
-
-function createUlid() {
-  const timePart = encodeTime(Date.now(), 10);
-  let randomPart = "";
-  for (let i = 0; i < 16; i += 1) {
-    randomPart += randomChar();
-  }
-  return `${timePart}${randomPart}`;
-}
-
-function isUlid(value: string) {
-  return ULID_REGEX.test(value);
-}
-
-function nowTs() {
-  return Date.now();
-}
-
+// normalizeCode 统一规范邀请码大小写，避免 mock 存储里出现大小写不一致的问题。
 function normalizeCode(code: string) {
   return code.trim().toUpperCase();
 }
 
+// cloneSpace 返回一份纯数据拷贝，避免页面直接改动内存里的 mock 源数据。
 function cloneSpace(space: SpaceData): SpaceData {
   return JSON.parse(JSON.stringify(space)) as SpaceData;
 }
 
+// createId 统一为所有 mock 记录生成 ULID。
 function createId() {
   return createUlid();
 }
 
-function createSpaceCode() {
-  let code = "";
-  do {
-    code = createId();
-  } while (spaces.has(code));
-  return code;
-}
-
+// clamp 把模拟坐标和电量限制在安全范围内。
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+// randomOffset 给地图点位增加微小偏移，让模拟移动看起来更自然。
 function randomOffset() {
   return (Math.random() - 0.5) * 0.008;
+}
+
+// isRemoteUri 用来区分网络图片地址和本地沙盒文件路径。
+function isRemoteUri(uri: string) {
+  return /^https?:\/\//i.test(uri);
+}
+
+// toAvatarFields 把单个头像地址拆成新 schema 里使用的本地与远程字段。
+function toAvatarFields(uri: string) {
+  if (!uri) {
+    return { avatar_local_uri: "", avatar_remote_url: "" };
+  }
+  if (isRemoteUri(uri)) {
+    return { avatar_local_uri: "", avatar_remote_url: uri };
+  }
+  return { avatar_local_uri: uri, avatar_remote_url: "" };
+}
+
+// getUserAvatarUri 负责挑选最适合页面渲染的头像地址。
+function getUserAvatarUri(user: UserRow) {
+  return user.avatar_local_uri || user.avatar_remote_url || "";
+}
+
+// createSpaceMemberId 根据空间和用户主键生成稳定的成员关系 id。
+function createSpaceMemberId(spaceId: string, userId: string) {
+  return `${spaceId}_${userId}`;
+}
+
+// getActiveMemberIds 只返回某个空间中尚未删除的成员 id。
+function getActiveMemberIds(space: SpaceData) {
+  return new Set(
+    space.spaceMembers
+      .filter((item) => !item.deleted_at)
+      .map((item) => item.user_id),
+  );
+}
+
+// activeMemberCount 用来判断空间是否需要在无人时自动移除。
+function activeMemberCount(space: SpaceData) {
+  return space.spaceMembers.filter((item) => !item.deleted_at).length;
 }
 
 export type UserProfile = {
@@ -71,20 +76,27 @@ export type UserProfile = {
 export type UserRow = {
   id: string;
   nickname: string;
-  avatarUrl: string;
+  avatar_local_uri: string;
+  avatar_remote_url: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at: number | null;
 };
 
 export type SpaceRow = {
   id: string;
   name: string;
-  code: string;
   created_at: number;
+  updated_at: number;
 };
 
 export type SpaceMemberRow = {
   id: string;
   space_id: string;
   user_id: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at: number | null;
 };
 
 export type PhotoRow = {
@@ -93,17 +105,41 @@ export type PhotoRow = {
   uploader_id: string;
   local_uri: string;
   remote_url: string;
+  post_id: string;
+  shoted_at: number;
   created_at: number;
+  updated_at: number;
+  deleted_at: number | null;
 };
 
-export type Expense = {
+export type ExpenseRow = {
   id: string;
   space_id: string;
   payer_id: string;
-  payer_name: string;
   amount: number;
   description: string;
   created_at: number;
+  updated_at: number;
+  deleted_at: number | null;
+};
+
+export type CommentRow = {
+  id: string;
+  content: string;
+  commenter_id: string;
+  post_id: string;
+  commented_at: number;
+  created_at: number;
+  updated_at: number;
+  deleted_at: number | null;
+};
+
+export type PostRow = {
+  id: string;
+  poster_id: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at: number | null;
 };
 
 export type LocationItem = {
@@ -118,37 +154,18 @@ export type LocationItem = {
   updated_at: number;
 };
 
-export type PostComment = {
-  id: string;
-  text: string;
-  author: string;
-  created_at: number;
-};
-
-export type SpacePost = {
-  id: string;
-  space_id: string;
-  uploader_id: string;
-  uploader_name: string;
-  text: string;
-  photo_ids: string[];
-  image_uris: string[];
-  created_at: number;
-  comments: PostComment[];
-};
-
 export type SpaceData = {
   id: string;
   name: string;
   code: string;
-  members: string[];
-  expenses: Expense[];
-  locations: LocationItem[];
-  posts: SpacePost[];
+  space: SpaceRow;
   users: UserRow[];
-  spaces: SpaceRow[];
   spaceMembers: SpaceMemberRow[];
   photos: PhotoRow[];
+  expenses: ExpenseRow[];
+  comments: CommentRow[];
+  posts: PostRow[];
+  locations: LocationItem[];
 };
 
 export type TeamData = SpaceData;
@@ -200,6 +217,7 @@ const LAT_MAX = 31.24;
 const LON_MIN = 121.455;
 const LON_MAX = 121.485;
 
+// spaces 是服务端同步尚未接入前，前端内存里的 mock 真值源。
 const spaces = new Map<string, SpaceData>();
 
 function randomImage() {
@@ -210,30 +228,78 @@ function randomText() {
   return SAMPLE_TEXTS[Math.floor(Math.random() * SAMPLE_TEXTS.length)];
 }
 
+// createUserRow 生成与规范化 `users` 表结构一致的用户记录。
+function createUserRow(
+  id: string,
+  nickname: string,
+  avatarUri: string,
+  createdAt: number,
+): UserRow {
+  const avatarFields = toAvatarFields(avatarUri);
+  return {
+    id,
+    nickname,
+    ...avatarFields,
+    created_at: createdAt,
+    updated_at: createdAt,
+    deleted_at: null,
+  };
+}
+
+// createPhoto 生成一条同时关联动态和旅行空间的图片记录。
 function createPhoto(
   spaceId: string,
   uploaderId: string,
+  postId: string,
   uri: string,
+  shotedAt: number,
 ): PhotoRow {
   return {
     id: createId(),
     space_id: spaceId,
     uploader_id: uploaderId,
-    local_uri: uri,
-    remote_url: uri,
-    created_at: nowTs(),
+    local_uri: isRemoteUri(uri) ? "" : uri,
+    remote_url: isRemoteUri(uri) ? uri : "",
+    post_id: postId,
+    shoted_at: shotedAt,
+    created_at: shotedAt,
+    updated_at: shotedAt,
+    deleted_at: null,
   };
 }
 
+// createComment 生成一条挂在动态上的评论记录。
+function createComment(
+  postId: string,
+  commenterId: string,
+  content: string,
+  commentedAt: number,
+): CommentRow {
+  return {
+    id: createId(),
+    content,
+    commenter_id: commenterId,
+    post_id: postId,
+    commented_at: commentedAt,
+    created_at: commentedAt,
+    updated_at: commentedAt,
+    deleted_at: null,
+  };
+}
+
+// getCurrentUser 返回当前 mock 流程里扮演“我”的本地用户。
 export function getCurrentUser() {
   return CURRENT_USER;
 }
 
+// updateCurrentUserProfile 会把资料修改同步映射到已有 mock 空间和位置数据里。
 export function updateCurrentUserProfile(next: {
   nickname?: string;
   avatarUrl?: string;
+  avatarLocalUri?: string;
+  avatarRemoteUrl?: string;
 }) {
-  const prevNickname = CURRENT_USER.username;
+  const updatedAt = nowTimestamp();
 
   if (next.nickname && next.nickname.trim()) {
     const clean = next.nickname.trim();
@@ -242,102 +308,239 @@ export function updateCurrentUserProfile(next: {
     CURRENT_USER.accountName = clean;
   }
 
-  if (next.avatarUrl && next.avatarUrl.trim()) {
+  if (next.avatarLocalUri !== undefined || next.avatarRemoteUrl !== undefined) {
+    CURRENT_USER.avatarUrl =
+      next.avatarLocalUri || next.avatarRemoteUrl || CURRENT_USER.avatarUrl;
+  } else if (next.avatarUrl && next.avatarUrl.trim()) {
     CURRENT_USER.avatarUrl = next.avatarUrl.trim();
   }
 
   const latestNickname = CURRENT_USER.username;
-  const latestAvatar = CURRENT_USER.avatarUrl;
+  const latestAvatarFields =
+    next.avatarLocalUri !== undefined || next.avatarRemoteUrl !== undefined
+      ? {
+          avatar_local_uri: next.avatarLocalUri ?? "",
+          avatar_remote_url: next.avatarRemoteUrl ?? "",
+        }
+      : toAvatarFields(CURRENT_USER.avatarUrl);
 
   for (const space of spaces.values()) {
     space.users = space.users.map((user) =>
       user.id === CURRENT_USER.id
-        ? { ...user, nickname: latestNickname, avatarUrl: latestAvatar }
+        ? {
+            ...user,
+            nickname: latestNickname,
+            avatar_local_uri: latestAvatarFields.avatar_local_uri,
+            avatar_remote_url: latestAvatarFields.avatar_remote_url,
+            updated_at: updatedAt,
+            deleted_at: null,
+          }
         : user,
-    );
-
-    space.members = space.members.map((name) =>
-      name === prevNickname ? latestNickname : name,
     );
 
     space.locations = space.locations.map((item) =>
       item.user_id === CURRENT_USER.id
-        ? { ...item, username: latestNickname, avatarUrl: latestAvatar }
+        ? {
+            ...item,
+            username: latestNickname,
+            avatarUrl: CURRENT_USER.avatarUrl,
+            updated_at: updatedAt,
+          }
         : item,
+    );
+
+    const hasCurrentUser = space.users.some(
+      (user) => user.id === CURRENT_USER.id,
+    );
+    if (!hasCurrentUser) {
+      space.users.push(
+        createUserRow(
+          CURRENT_USER.id,
+          latestNickname,
+          CURRENT_USER.avatarUrl,
+          updatedAt,
+        ),
+      );
+    }
+
+    space.comments = space.comments.map((comment) =>
+      comment.commenter_id === CURRENT_USER.id
+        ? { ...comment, updated_at: updatedAt }
+        : comment,
+    );
+
+    space.posts = space.posts.map((post) =>
+      post.poster_id === CURRENT_USER.id
+        ? { ...post, updated_at: updatedAt }
+        : post,
     );
   }
 }
 
+// createSpaceForCurrentUser 会为当前用户初始化一个包含成员、动态、账单和位置的示例空间。
 export function createSpaceForCurrentUser() {
-  const code = createSpaceCode();
-  const createdAt = nowTs();
+  const createdAt = nowTimestamp();
   const spaceId = createId();
+  const code = spaceId;
 
-  const users: UserRow[] = [
-    {
-      id: MEMBER_IDS.me,
-      nickname: CURRENT_USER.username,
-      avatarUrl: MEMBER_AVATARS.me,
-    },
-    {
-      id: MEMBER_IDS.xiaoli,
-      nickname: "小丽",
-      avatarUrl: MEMBER_AVATARS.xiaoli,
-    },
-    { id: MEMBER_IDS.ajun, nickname: "阿军", avatarUrl: MEMBER_AVATARS.ajun },
-  ];
+  const currentUserRow = createUserRow(
+    CURRENT_USER.id,
+    CURRENT_USER.username,
+    CURRENT_USER.avatarUrl,
+    createdAt,
+  );
+  const xiaoliRow = createUserRow(
+    MEMBER_IDS.xiaoli,
+    "小丽",
+    MEMBER_AVATARS.xiaoli,
+    createdAt,
+  );
+  const ajunRow = createUserRow(
+    MEMBER_IDS.ajun,
+    "阿军",
+    MEMBER_AVATARS.ajun,
+    createdAt,
+  );
 
   const spaceRow: SpaceRow = {
     id: spaceId,
     name: "春日旅行空间",
-    code,
     created_at: createdAt,
+    updated_at: createdAt,
   };
 
   const spaceMembers: SpaceMemberRow[] = [
-    { id: createId(), space_id: spaceId, user_id: MEMBER_IDS.me },
-    { id: createId(), space_id: spaceId, user_id: MEMBER_IDS.xiaoli },
-    { id: createId(), space_id: spaceId, user_id: MEMBER_IDS.ajun },
+    {
+      id: createSpaceMemberId(spaceId, CURRENT_USER.id),
+      space_id: spaceId,
+      user_id: CURRENT_USER.id,
+      created_at: createdAt,
+      updated_at: createdAt,
+      deleted_at: null,
+    },
+    {
+      id: createSpaceMemberId(spaceId, MEMBER_IDS.xiaoli),
+      space_id: spaceId,
+      user_id: MEMBER_IDS.xiaoli,
+      created_at: createdAt,
+      updated_at: createdAt,
+      deleted_at: null,
+    },
+    {
+      id: createSpaceMemberId(spaceId, MEMBER_IDS.ajun),
+      space_id: spaceId,
+      user_id: MEMBER_IDS.ajun,
+      created_at: createdAt,
+      updated_at: createdAt,
+      deleted_at: null,
+    },
   ];
 
-  const p1 = createPhoto(spaceId, MEMBER_IDS.xiaoli, randomImage());
-  const p2 = createPhoto(spaceId, MEMBER_IDS.xiaoli, randomImage());
+  const firstPostCreatedAt = createdAt;
+  const firstPostId = createId();
+  const firstCaption = randomText();
+  const firstPhotoA = createPhoto(
+    spaceId,
+    MEMBER_IDS.xiaoli,
+    firstPostId,
+    randomImage(),
+    firstPostCreatedAt,
+  );
+  const firstPhotoB = createPhoto(
+    spaceId,
+    MEMBER_IDS.xiaoli,
+    firstPostId,
+    randomImage(),
+    firstPostCreatedAt + 60_000,
+  );
+
+  const secondPostCreatedAt = createdAt - 60 * 60 * 1000;
+  const secondPostId = createId();
+  const secondCaption = "明天早上 8 点酒店大堂集合。";
+  const secondPhoto = createPhoto(
+    spaceId,
+    MEMBER_IDS.ajun,
+    secondPostId,
+    randomImage(),
+    secondPostCreatedAt,
+  );
+
+  const posts: PostRow[] = [
+    {
+      id: firstPostId,
+      poster_id: MEMBER_IDS.xiaoli,
+      created_at: firstPostCreatedAt,
+      updated_at: firstPostCreatedAt,
+      deleted_at: null,
+    },
+    {
+      id: secondPostId,
+      poster_id: MEMBER_IDS.ajun,
+      created_at: secondPostCreatedAt,
+      updated_at: secondPostCreatedAt,
+      deleted_at: null,
+    },
+  ];
+
+  const comments: CommentRow[] = [
+    createComment(
+      firstPostId,
+      MEMBER_IDS.xiaoli,
+      firstCaption,
+      firstPostCreatedAt,
+    ),
+    createComment(
+      firstPostId,
+      MEMBER_IDS.ajun,
+      "这个景色太棒了！",
+      firstPostCreatedAt + 10 * 60 * 1000,
+    ),
+    createComment(
+      secondPostId,
+      MEMBER_IDS.ajun,
+      secondCaption,
+      secondPostCreatedAt,
+    ),
+  ];
 
   const space: SpaceData = {
     id: spaceId,
     name: spaceRow.name,
     code,
-    members: users.map((u) => u.nickname),
-    users,
-    spaces: [spaceRow],
+    space: spaceRow,
+    users: [currentUserRow, xiaoliRow, ajunRow],
     spaceMembers,
-    photos: [p1, p2],
+    photos: [firstPhotoA, firstPhotoB, secondPhoto],
     expenses: [
       {
         id: createId(),
         space_id: spaceId,
         payer_id: CURRENT_USER.id,
-        payer_name: CURRENT_USER.username,
         amount: 86,
         description: "打车去酒店",
         created_at: createdAt,
+        updated_at: createdAt,
+        deleted_at: null,
       },
       {
         id: createId(),
         space_id: spaceId,
         payer_id: MEMBER_IDS.xiaoli,
-        payer_name: "小丽",
         amount: 248,
         description: "晚饭",
         created_at: createdAt,
+        updated_at: createdAt,
+        deleted_at: null,
       },
     ],
+    comments,
+    posts,
     locations: [
       {
         id: createId(),
         user_id: CURRENT_USER.id,
         username: CURRENT_USER.username,
-        avatarUrl: MEMBER_AVATARS.me,
+        avatarUrl: CURRENT_USER.avatarUrl,
         latitude: 31.2286,
         longitude: 121.4721,
         battery: 78,
@@ -367,43 +570,13 @@ export function createSpaceForCurrentUser() {
         updated_at: createdAt,
       },
     ],
-    posts: [
-      {
-        id: createId(),
-        space_id: spaceId,
-        uploader_id: MEMBER_IDS.xiaoli,
-        uploader_name: "小丽",
-        text: randomText(),
-        photo_ids: [p1.id, p2.id],
-        image_uris: [p1.remote_url, p2.remote_url],
-        created_at: createdAt,
-        comments: [
-          {
-            id: createId(),
-            text: "这个景色太棒了！",
-            author: "阿军",
-            created_at: createdAt,
-          },
-        ],
-      },
-      {
-        id: createId(),
-        space_id: spaceId,
-        uploader_id: MEMBER_IDS.ajun,
-        uploader_name: "阿军",
-        text: "明天早上 8 点酒店大堂集合。",
-        photo_ids: [],
-        image_uris: [],
-        created_at: createdAt - 3600 * 1000,
-        comments: [],
-      },
-    ],
   };
 
   spaces.set(code, space);
   return cloneSpace(space);
 }
 
+// joinSpaceByCode 会让当前用户重新激活并加入已有的 mock 空间。
 export function joinSpaceByCode(inputCode: string): JoinResult {
   const code = normalizeCode(inputCode);
   if (!code) {
@@ -418,28 +591,63 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
     return { ok: false, message: "未找到旅行空间，请确认口令。" };
   }
 
-  const hasMember = space.spaceMembers.some(
+  const joinedAt = nowTimestamp();
+  const existingMember = space.spaceMembers.find(
     (item) => item.user_id === CURRENT_USER.id,
   );
-  if (!hasMember) {
+
+  if (existingMember) {
+    existingMember.deleted_at = null;
+    existingMember.updated_at = joinedAt;
+  } else {
     space.spaceMembers.push({
-      id: createId(),
+      id: createSpaceMemberId(space.id, CURRENT_USER.id),
       space_id: space.id,
       user_id: CURRENT_USER.id,
+      created_at: joinedAt,
+      updated_at: joinedAt,
+      deleted_at: null,
     });
+  }
 
-    if (!space.users.find((u) => u.id === CURRENT_USER.id)) {
-      space.users.push({
-        id: CURRENT_USER.id,
-        nickname: CURRENT_USER.username,
-        avatarUrl: CURRENT_USER.avatarUrl,
-      });
-    }
+  const existingUser = space.users.find((user) => user.id === CURRENT_USER.id);
+  if (existingUser) {
+    const avatarFields = toAvatarFields(CURRENT_USER.avatarUrl);
+    existingUser.nickname = CURRENT_USER.username;
+    existingUser.avatar_local_uri = avatarFields.avatar_local_uri;
+    existingUser.avatar_remote_url = avatarFields.avatar_remote_url;
+    existingUser.updated_at = joinedAt;
+    existingUser.deleted_at = null;
+  } else {
+    space.users.push(
+      createUserRow(
+        CURRENT_USER.id,
+        CURRENT_USER.username,
+        CURRENT_USER.avatarUrl,
+        joinedAt,
+      ),
+    );
+  }
 
-    if (!space.members.includes(CURRENT_USER.username)) {
-      space.members.push(CURRENT_USER.username);
-    }
-
+  const existingLocation = space.locations.find(
+    (item) => item.user_id === CURRENT_USER.id,
+  );
+  if (existingLocation) {
+    existingLocation.username = CURRENT_USER.username;
+    existingLocation.avatarUrl = CURRENT_USER.avatarUrl;
+    existingLocation.latitude = clamp(
+      31.2286 + randomOffset(),
+      LAT_MIN,
+      LAT_MAX,
+    );
+    existingLocation.longitude = clamp(
+      121.4721 + randomOffset(),
+      LON_MIN,
+      LON_MAX,
+    );
+    existingLocation.battery = 74;
+    existingLocation.updated_at = joinedAt;
+  } else {
     space.locations.push({
       id: createId(),
       user_id: CURRENT_USER.id,
@@ -449,13 +657,14 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
       longitude: clamp(121.4721 + randomOffset(), LON_MIN, LON_MAX),
       battery: 74,
       sharing: true,
-      updated_at: nowTs(),
+      updated_at: joinedAt,
     });
   }
 
   return { ok: true, space: cloneSpace(space) };
 }
 
+// leaveSpaceByCode 会把当前用户标记为离开，并移除对应的实时位置。
 export function leaveSpaceByCode(inputCode: string): LeaveResult {
   const code = normalizeCode(inputCode);
   if (!isUlid(code)) {
@@ -467,17 +676,17 @@ export function leaveSpaceByCode(inputCode: string): LeaveResult {
     return { ok: false, message: "旅行空间不存在。" };
   }
 
-  space.spaceMembers = space.spaceMembers.filter(
-    (item) => item.user_id !== CURRENT_USER.id,
-  );
-  space.members = space.members.filter(
-    (name) => name !== CURRENT_USER.username,
+  const leftAt = nowTimestamp();
+  space.spaceMembers = space.spaceMembers.map((item) =>
+    item.user_id === CURRENT_USER.id
+      ? { ...item, updated_at: leftAt, deleted_at: leftAt }
+      : item,
   );
   space.locations = space.locations.filter(
     (item) => item.user_id !== CURRENT_USER.id,
   );
 
-  if (space.members.length === 0) {
+  if (activeMemberCount(space) === 0) {
     spaces.delete(code);
     return { ok: true, space: null, message: "你已退出，空间已自动结束。" };
   }
@@ -485,6 +694,7 @@ export function leaveSpaceByCode(inputCode: string): LeaveResult {
   return { ok: true, space: cloneSpace(space), message: "你已退出旅行空间。" };
 }
 
+// getSpaceByCode 根据邀请码安全查找 mock 旅行空间。
 export function getSpaceByCode(inputCode: string) {
   const code = normalizeCode(inputCode);
   if (!isUlid(code)) {
@@ -494,6 +704,7 @@ export function getSpaceByCode(inputCode: string) {
   return space ? cloneSpace(space) : null;
 }
 
+// addPostToSpace 会向 mock 空间追加一条新动态及其配图记录。
 export function addPostToSpace(
   inputCode: string,
   text: string,
@@ -505,33 +716,41 @@ export function addPostToSpace(
   }
 
   const cleanText = text.trim();
-  const cleanImages = (imageUris ?? []).map((u) => u.trim()).filter(Boolean);
-  if (!cleanText && cleanImages.length === 0) {
-    return { ok: false as const, message: "请至少输入文字或图片地址。" };
+  const cleanImages = (imageUris ?? [])
+    .map((uri) => uri.trim())
+    .filter(Boolean);
+  if (cleanImages.length === 0) {
+    return {
+      ok: false as const,
+      message: "根据当前数据结构，发布动态时至少需要一张图片。",
+    };
   }
 
-  const photos = cleanImages.map((uri) =>
-    createPhoto(space.id, CURRENT_USER.id, uri),
+  const createdAt = nowTimestamp();
+  const postId = createId();
+  const photos = cleanImages.map((uri, index) =>
+    createPhoto(space.id, CURRENT_USER.id, postId, uri, createdAt + index),
   );
-  if (photos.length > 0) {
-    space.photos.unshift(...photos);
-  }
 
   space.posts.unshift({
-    id: createId(),
-    space_id: space.id,
-    uploader_id: CURRENT_USER.id,
-    uploader_name: CURRENT_USER.username,
-    text: cleanText,
-    photo_ids: photos.map((p) => p.id),
-    image_uris: photos.map((p) => p.remote_url),
-    created_at: nowTs(),
-    comments: [],
+    id: postId,
+    poster_id: CURRENT_USER.id,
+    created_at: createdAt,
+    updated_at: createdAt,
+    deleted_at: null,
   });
+  space.photos.unshift(...photos);
+
+  if (cleanText) {
+    space.comments.unshift(
+      createComment(postId, CURRENT_USER.id, cleanText, createdAt),
+    );
+  }
 
   return { ok: true as const, space: cloneSpace(space) };
 }
 
+// addCommentToPost 会追加一条评论，并同步更新父动态的更新时间。
 export function addCommentToPost(
   inputCode: string,
   postId: string,
@@ -542,7 +761,9 @@ export function addCommentToPost(
     return { ok: false as const, message: "旅行空间不存在。" };
   }
 
-  const post = space.posts.find((p) => p.id === postId);
+  const post = space.posts.find(
+    (item) => item.id === postId && !item.deleted_at,
+  );
   if (!post) {
     return { ok: false as const, message: "动态不存在。" };
   }
@@ -552,16 +773,16 @@ export function addCommentToPost(
     return { ok: false as const, message: "请输入评论内容。" };
   }
 
-  post.comments.push({
-    id: createId(),
-    text: content,
-    author: CURRENT_USER.username,
-    created_at: nowTs(),
-  });
+  const commentedAt = nowTimestamp();
+  space.comments.push(
+    createComment(postId, CURRENT_USER.id, content, commentedAt),
+  );
+  post.updated_at = commentedAt;
 
   return { ok: true as const, space: cloneSpace(space) };
 }
 
+// addExpenseToSpace 会向 mock 空间追加一条账单记录。
 export function addExpenseToSpace(
   inputCode: string,
   title: string,
@@ -581,39 +802,50 @@ export function addExpenseToSpace(
     return { ok: false as const, message: "金额必须大于 0。" };
   }
 
+  const createdAt = nowTimestamp();
   space.expenses.unshift({
     id: createId(),
     space_id: space.id,
     payer_id: CURRENT_USER.id,
-    payer_name: CURRENT_USER.username,
     amount: Number(parsed.toFixed(2)),
     description: cleanTitle,
-    created_at: nowTs(),
+    created_at: createdAt,
+    updated_at: createdAt,
+    deleted_at: null,
   });
 
   return { ok: true as const, space: cloneSpace(space) };
 }
 
+// simulateOtherMembersLocation 通过轻微扰动成员坐标来模拟实时移动效果。
 export function simulateOtherMembersLocation(inputCode: string) {
   const space = spaces.get(normalizeCode(inputCode));
   if (!space) {
     return { ok: false as const, message: "旅行空间不存在。" };
   }
 
-  space.locations = space.locations.map((item) => {
-    const battery = clamp(Math.round(item.battery - Math.random() * 4), 1, 100);
-    return {
-      ...item,
-      latitude: clamp(item.latitude + randomOffset(), LAT_MIN, LAT_MAX),
-      longitude: clamp(item.longitude + randomOffset(), LON_MIN, LON_MAX),
-      battery,
-      updated_at: nowTs(),
-    };
-  });
+  const activeMemberIds = getActiveMemberIds(space);
+  space.locations = space.locations
+    .filter((item) => activeMemberIds.has(item.user_id))
+    .map((item) => {
+      const battery = clamp(
+        Math.round(item.battery - Math.random() * 4),
+        1,
+        100,
+      );
+      return {
+        ...item,
+        latitude: clamp(item.latitude + randomOffset(), LAT_MIN, LAT_MAX),
+        longitude: clamp(item.longitude + randomOffset(), LON_MIN, LON_MAX),
+        battery,
+        updated_at: nowTimestamp(),
+      };
+    });
 
   return { ok: true as const, space: cloneSpace(space) };
 }
 
+// disbandSpaceByCode 会彻底移除一个 mock 旅行空间。
 export function disbandSpaceByCode(inputCode: string) {
   const code = normalizeCode(inputCode);
   if (!isUlid(code)) {
@@ -672,4 +904,8 @@ export function addExpenseToTeam(
 
 export function disbandTeamByCode(inputCode: string) {
   return disbandSpaceByCode(inputCode);
+}
+
+export function getDisplayAvatarForUser(user: UserRow) {
+  return getUserAvatarUri(user);
 }

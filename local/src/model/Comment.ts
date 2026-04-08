@@ -1,21 +1,25 @@
 import { Model } from "@nozbe/watermelondb";
 import { date, field, readonly, text } from "@nozbe/watermelondb/decorators";
 
-// User 对应本地 `users` 表里持久化保存的一条旅行者资料记录。
-export default class User extends Model {
-  static table = "users";
+// Comment 对应本地 `comments` 表中的一条动态评论记录。
+export default class Comment extends Model {
+  static table = "comments";
 
-  // nickname 表示空间列表、动态等场景里展示的昵称。
+  // content 保存评论正文内容。
   // @ts-ignore
-  @text("nickname") nickname;
+  @text("content") content;
 
-  // avatarLocalUri 指向设备上选中的本地沙盒头像文件。
+  // commenterId 记录是哪位成员写下了这条评论。
   // @ts-ignore
-  @text("avatar_local_uri") avatarLocalUri;
+  @text("commenter_id") commenterId;
 
-  // avatarRemoteUrl 在没有本地头像时保存一个可回退使用的网络头像地址。
+  // postId 把评论关联回所属动态。
   // @ts-ignore
-  @text("avatar_remote_url") avatarRemoteUrl;
+  @text("post_id") postId;
+
+  // commentedAt 记录评论逻辑上的发布时间。
+  // @ts-ignore
+  @date("commented_at") commentedAt;
 
   // createdAt 记录这条本地数据的创建时间。
   // @ts-ignore

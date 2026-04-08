@@ -1,39 +1,35 @@
 import { Model } from "@nozbe/watermelondb";
-import {
-  field,
-  text,
-  date,
-  readonly,
-  relation,
-} from "@nozbe/watermelondb/decorators";
+import { date, field, readonly, text } from "@nozbe/watermelondb/decorators";
 
+// Expense 对应本地 `expenses` 表中的一条账单记录。
 export default class Expense extends Model {
-  // 瀵瑰簲 schema 涓殑 'expenses' 琛?
   static table = "expenses";
 
-  // 瀹氫箟鍏宠仈锛氳繖涓处鍗曞睘浜庡摢涓┖闂?
-  // @ts-ignore
-  @relation("spaces", "space_id") space;
-
+  // spaceId 指向这笔账单所属的旅行空间。
   // @ts-ignore
   @text("space_id") spaceId;
 
+  // payerId 记录这笔账单由哪位成员付款。
   // @ts-ignore
   @text("payer_id") payerId;
 
-  // @ts-ignore
-  @text("payer_name") payerName;
-
+  // amount 以“分”为单位存储金额，避免浮点计算误差。
   // @ts-ignore
   @field("amount") amount;
 
+  // description 保存给用户看的账单名称。
   // @ts-ignore
   @text("description") description;
 
-  // WatermelonDB 浼氳嚜鍔ㄧ鐞嗙殑鍒涘缓/鏇存柊鏃堕棿
+  // createdAt 记录这条本地数据的创建时间。
   // @ts-ignore
   @readonly @date("created_at") createdAt;
 
+  // updatedAt 记录这条本地数据最近一次变更时间。
   // @ts-ignore
   @readonly @date("updated_at") updatedAt;
+
+  // deletedAt 用于软删除标记，方便后续同步时识别删除状态。
+  // @ts-ignore
+  @field("deleted_at") deletedAt;
 }

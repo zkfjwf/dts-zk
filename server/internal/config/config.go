@@ -12,13 +12,11 @@ type Config struct {
 
 var GlobalConfig Config
 
+// InitConfig 读取 YAML 配置和环境变量覆盖项，并写入全局共享配置。
 func InitConfig() {
 	viper.SetConfigName("config")
-	
 	viper.SetConfigType("yaml")
-	
 	viper.AddConfigPath("internal/config")
-	
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {

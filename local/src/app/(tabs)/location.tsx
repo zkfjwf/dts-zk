@@ -33,32 +33,358 @@ type MapEvent =
   | { type: "error"; message?: string }
   | { type: "timeout"; message?: string };
 
-function normalizeOrigin(value: string) {
-  return value.trim().replace(/\/+$/, "");
-}
+const LOCAL_BAIDU_MAP_PAGE_ORIGIN = "https://travel-map.local";
+const LOCAL_BAIDU_MAP_BASE_URL = `${LOCAL_BAIDU_MAP_PAGE_ORIGIN}/`;
 
+// 从 Expo 公共环境变量里读取浏览器端百度地图密钥。
 function getBaiduAk() {
   return process.env.EXPO_PUBLIC_BAIDU_MAP_AK?.trim() ?? "";
 }
 
-function getBaiduMapPageOrigin() {
-  return normalizeOrigin(
-    process.env.EXPO_PUBLIC_BAIDU_MAP_WEB_ORIGIN ??
-      process.env.EXPO_PUBLIC_API_URL ??
-      "",
+// 把数据安全序列化进内联脚本，避免用户文本打断 HTML 结构。
+function serializeInlineScriptValue(value: unknown) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+// 检查经纬度是否仍在合法范围内，避免异常点位拖垮地图渲染。
+function isValidCoordinate(latitude: number, longitude: number) {
+  return (
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
   );
 }
 
-function buildHostedMapUrl(origin: string, ak: string, points: MapPoint[]) {
-  if (!origin || !ak || points.length === 0) {
+// 直接在本地 WebView 中构造百度地图宿主页，不再经过自建服务器转发。
+function buildLocalMapHtml(ak: string, points: MapPoint[]) {
+  if (!ak || points.length === 0) {
     return "";
   }
 
-  return `${origin}/baidu/live-map?ak=${encodeURIComponent(
-    ak,
-  )}&points=${encodeURIComponent(JSON.stringify(points))}`;
+  const akJson = serializeInlineScriptValue(ak);
+  const pointsJson = serializeInlineScriptValue(points);
+  const localOriginJson = serializeInlineScriptValue(
+    LOCAL_BAIDU_MAP_PAGE_ORIGIN,
+  );
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <style>
+      html,
+      body,
+      #map {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #edf3fb;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      const BAIDU_AK = ${akJson};
+      const MAP_POINTS = ${pointsJson};
+      const MAP_PAGE_ORIGIN =
+        window.location.origin || window.location.href || ${localOriginJson};
+      const MAP_LOAD_TIMEOUT = 15000;
+      const SDK_READY_CALLBACK = "__baiduMapSdkReady__";
+      const MAP_TRANSLATE_BATCH_SIZE = 10;
+      let hasMounted = false;
+
+      function postMessage(payload) {
+        if (
+          window.ReactNativeWebView &&
+          typeof window.ReactNativeWebView.postMessage === "function"
+        ) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+        }
+      }
+
+      function formatInfo(item) {
+        return (
+          '<div style="min-width:180px;color:#1f2d44;font-size:13px;line-height:1.65;">' +
+          '<div style="font-weight:700;font-size:14px;margin-bottom:4px;">' +
+          item.username +
+          (item.isCurrentUser ? "（我）" : "") +
+          "</div>" +
+          "<div>电量：" +
+          item.battery +
+          "%</div>" +
+          "<div>纬度：" +
+          item.latitude.toFixed(6) +
+          "</div>" +
+          "<div>经度：" +
+          item.longitude.toFixed(6) +
+          "</div>" +
+          "</div>"
+        );
+      }
+
+      function toErrorMessage(error, fallbackMessage) {
+        if (error && typeof error.message === "string") {
+          return error.message;
+        }
+        if (typeof error === "string") {
+          return error;
+        }
+        return fallbackMessage;
+      }
+
+      function chunkArray(items, size) {
+        const chunks = [];
+        for (let index = 0; index < items.length; index += size) {
+          chunks.push(items.slice(index, index + size));
+        }
+        return chunks;
+      }
+
+      // 批量把原始经纬度转换成百度地图坐标。
+      function translateBatch(batch) {
+        return new Promise((resolve, reject) => {
+          try {
+            if (!window.BMap || !window.BMap.Convertor) {
+              resolve(batch);
+              return;
+            }
+
+            const convertor = new window.BMap.Convertor();
+            const pointList = batch.map(
+              (item) => new window.BMap.Point(item.longitude, item.latitude),
+            );
+
+            convertor.translate(pointList, 1, 5, function (data) {
+              if (
+                !data ||
+                data.status !== 0 ||
+                !Array.isArray(data.points) ||
+                data.points.length !== batch.length
+              ) {
+                reject(new Error("百度坐标转换失败。"));
+                return;
+              }
+
+              resolve(
+                batch.map((item, index) => ({
+                  ...item,
+                  longitude: data.points[index].lng,
+                  latitude: data.points[index].lat,
+                })),
+              );
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+
+      // 分批转换点位，避免一次性转换过多点时不稳定。
+      async function translatePoints(points) {
+        if (!Array.isArray(points) || points.length === 0) {
+          return [];
+        }
+
+        if (!window.BMap || !window.BMap.Convertor) {
+          return points;
+        }
+
+        const translated = [];
+        const batches = chunkArray(points, MAP_TRANSLATE_BATCH_SIZE);
+
+        for (const batch of batches) {
+          try {
+            const converted = await translateBatch(batch);
+            translated.push(...converted);
+          } catch {
+            translated.push(...batch);
+          }
+        }
+
+        return translated;
+      }
+
+      // SDK 就绪后渲染标记点、标签和信息窗。
+      function renderMap(points) {
+        if (!window.BMap) {
+          throw new Error(
+            "百度地图脚本已加载，但 BMap 不可用，请检查浏览器端密钥白名单是否允许当前来源访问：" +
+              MAP_PAGE_ORIGIN,
+          );
+        }
+
+        if (!Array.isArray(points) || points.length === 0) {
+          throw new Error("暂无可展示的位置数据。");
+        }
+
+        const map = new window.BMap.Map("map");
+        const viewPoints = [];
+
+        map.enableScrollWheelZoom(true);
+        map.enableContinuousZoom();
+        map.enableInertialDragging();
+        map.addControl(new window.BMap.NavigationControl());
+        map.addControl(new window.BMap.ScaleControl());
+
+        points.forEach((item) => {
+          const point = new window.BMap.Point(item.longitude, item.latitude);
+          const marker = new window.BMap.Marker(point);
+          if (item.isCurrentUser) {
+            const icon = new window.BMap.Symbol(window.BMap_Symbol_SHAPE_POINT, {
+              scale: 1.3,
+              fillColor: "#0A69F5",
+              fillOpacity: 1,
+              strokeColor: "#FFFFFF",
+              strokeWeight: 3,
+            });
+            marker.setIcon(icon);
+          }
+
+          const label = new window.BMap.Label(
+            item.username +
+              (item.isCurrentUser ? "（我）" : "") +
+              " | 电量 " +
+              item.battery +
+              "%",
+            {
+              offset: new window.BMap.Size(18, -10),
+            },
+          );
+
+          label.setStyle({
+            color: "#1f2d44",
+            backgroundColor: "#ffffff",
+            border: "1px solid #d2deeb",
+            borderRadius: "999px",
+            padding: "4px 8px",
+            fontSize: "12px",
+            fontWeight: "600",
+            boxShadow: "0 4px 16px rgba(15,23,42,0.12)",
+          });
+
+          marker.setLabel(label);
+          marker.addEventListener("click", function () {
+            map.openInfoWindow(new window.BMap.InfoWindow(formatInfo(item)), point);
+          });
+
+          map.addOverlay(marker);
+          viewPoints.push(point);
+        });
+
+        if (viewPoints.length === 1) {
+          map.centerAndZoom(viewPoints[0], 15);
+        } else {
+          map.setViewport(viewPoints);
+        }
+      }
+
+      // 地图的单次挂载入口，负责转换点位并完成首次绘制。
+      async function mountMap() {
+        if (hasMounted) {
+          return;
+        }
+
+        const translatedPoints = await translatePoints(MAP_POINTS);
+        renderMap(translatedPoints);
+        hasMounted = true;
+        postMessage({ type: "ready" });
+      }
+
+      window.addEventListener("error", function (event) {
+        const filename =
+          event && typeof event.filename === "string" ? event.filename : "";
+        const message =
+          event && typeof event.message === "string"
+            ? event.message
+            : "未知脚本错误";
+
+        if (message === "Script error." || /api\\.map\\.baidu\\.com/i.test(filename)) {
+          postMessage({
+            type: "error",
+            message:
+              "百度地图脚本触发跨域错误，请检查浏览器端密钥白名单是否允许当前页面来源：" +
+              MAP_PAGE_ORIGIN,
+          });
+          return;
+        }
+
+        postMessage({
+          type: "error",
+          message: message + (filename ? " @ " + filename : ""),
+        });
+      });
+
+      window.addEventListener("unhandledrejection", function (event) {
+        postMessage({
+          type: "error",
+          message: toErrorMessage(event && event.reason, "未处理的 Promise 异常"),
+        });
+      });
+
+      // 负责在本地 WebView 中加载百度地图 SDK，并把初始化状态回传给 React Native。
+      (function bootstrap() {
+        if (!BAIDU_AK) {
+          postMessage({ type: "error", message: "缺少百度地图密钥。" });
+          return;
+        }
+
+        const timeoutId = window.setTimeout(function () {
+          postMessage({
+            type: "timeout",
+            message:
+              "加载百度实时地图超时，请检查设备网络以及浏览器端密钥白名单是否允许当前页面来源：" +
+              MAP_PAGE_ORIGIN,
+          });
+        }, MAP_LOAD_TIMEOUT);
+
+        window[SDK_READY_CALLBACK] = function () {
+          window.clearTimeout(timeoutId);
+          Promise.resolve()
+            .then(mountMap)
+            .catch(function (error) {
+              postMessage({
+                type: "error",
+                message: toErrorMessage(error, "实时地图初始化失败。"),
+              });
+            });
+        };
+
+        const script = document.createElement("script");
+        script.src =
+          "https://api.map.baidu.com/api?v=3.0&ak=" +
+          encodeURIComponent(BAIDU_AK) +
+          "&callback=" +
+          encodeURIComponent(SDK_READY_CALLBACK);
+        script.async = true;
+        script.onerror = function () {
+          window.clearTimeout(timeoutId);
+          postMessage({
+            type: "error",
+            message:
+              "百度地图脚本加载失败，请检查设备网络以及浏览器端密钥是否已启用。",
+          });
+        };
+        document.head.appendChild(script);
+      })();
+    </script>
+  </body>
+</html>`;
 }
 
+// 点位变化后强制重建 WebView，保证百度地图脚本重新读取最新数据。
 function buildMapKey(space: SpaceData | null) {
   if (!space) {
     return "none";
@@ -72,24 +398,23 @@ function buildMapKey(space: SpaceData | null) {
     .join("|")}`;
 }
 
-function isMainMapDocument(url: string) {
-  return /\/baidu\/live-map(?:\?|$)/.test(url);
-}
-
+// 位置页负责展示百度实时地图和当前空间的成员位置列表。
 export default function LocationPage() {
   const { code } = useLocalSearchParams<{ code?: string }>();
   const spaceCode = typeof code === "string" ? code : "";
   const currentUser = getCurrentUser();
   const baiduAk = getBaiduAk();
-  const baiduMapPageOrigin = getBaiduMapPageOrigin();
 
+  // space 保存当前空间在前端 mock 层里的完整快照。
   const [space, setSpace] = useState<SpaceData | null>(() =>
     spaceCode ? getSpaceByCode(spaceCode) : null,
   );
+  // mapStatus 控制地图加载中、就绪和失败时的蒙层展示。
   const [mapStatus, setMapStatus] = useState<
     "idle" | "loading" | "ready" | "error"
   >("idle");
   const [mapErrorText, setMapErrorText] = useState("");
+  const [mapWarningText, setMapWarningText] = useState("");
 
   useFocusEffect(
     useCallback(() => {
@@ -118,24 +443,35 @@ export default function LocationPage() {
     }));
   }, [currentUser.id, space]);
 
+  const safeMapPoints = useMemo(
+    () =>
+      mapPoints.filter((item) =>
+        isValidCoordinate(item.latitude, item.longitude),
+      ),
+    [mapPoints],
+  );
+
   const mapKey = useMemo(() => buildMapKey(space), [space]);
 
-  const hostedMapUrl = useMemo(
-    () => buildHostedMapUrl(baiduMapPageOrigin, baiduAk, mapPoints),
-    [baiduAk, baiduMapPageOrigin, mapPoints],
+  const localMapHtml = useMemo(
+    () => buildLocalMapHtml(baiduAk, safeMapPoints),
+    [baiduAk, safeMapPoints],
   );
 
   useEffect(() => {
-    if (!hostedMapUrl) {
+    if (!localMapHtml) {
       setMapStatus("idle");
       setMapErrorText("");
+      setMapWarningText("");
       return;
     }
 
     setMapStatus("loading");
     setMapErrorText("");
-  }, [hostedMapUrl, mapKey]);
+    setMapWarningText("");
+  }, [localMapHtml, mapKey]);
 
+  // 刷新按钮会重新模拟成员坐标，方便开发阶段验证地图变化。
   const onRefresh = useCallback(() => {
     if (!spaceCode) {
       return;
@@ -149,8 +485,10 @@ export default function LocationPage() {
     setSpace(result.space);
     setMapStatus("loading");
     setMapErrorText("");
+    setMapWarningText("");
   }, [spaceCode]);
 
+  // 处理 WebView 地图页主动回传的 ready、warning 和 error 事件。
   const onMapMessage = useCallback((event: WebViewMessageEvent) => {
     try {
       const payload = JSON.parse(event.nativeEvent.data) as MapEvent;
@@ -158,6 +496,13 @@ export default function LocationPage() {
       if (payload.type === "ready") {
         setMapStatus("ready");
         setMapErrorText("");
+        return;
+      }
+
+      if (payload.type === "warning") {
+        setMapWarningText(
+          payload.message ?? "地图已加载，但存在部分异常点位。",
+        );
         return;
       }
 
@@ -216,12 +561,22 @@ export default function LocationPage() {
             </View>
           ) : null}
 
-          {baiduAk && !baiduMapPageOrigin ? (
+          {baiduAk ? (
             <View style={styles.noticeCard}>
-              <Text style={styles.noticeTitle}>缺少地图页面地址</Text>
+              <Text style={styles.noticeTitle}>地图已改为本地渲染</Text>
               <Text style={styles.noticeText}>
-                请在 `.env` 中配置 `EXPO_PUBLIC_BAIDU_MAP_WEB_ORIGIN` 或
-                `EXPO_PUBLIC_API_URL`。
+                当前位置页会直接在本地 WebView
+                中加载百度地图，不再请求你们自己的服务器地图页。
+              </Text>
+            </View>
+          ) : null}
+
+          {mapPoints.length > safeMapPoints.length ? (
+            <View style={styles.noticeCard}>
+              <Text style={styles.noticeTitle}>已忽略异常坐标</Text>
+              <Text style={styles.noticeText}>
+                当前有 {mapPoints.length - safeMapPoints.length}{" "}
+                个点位坐标不合法， 地图已自动跳过这些记录。
               </Text>
             </View>
           ) : null}
@@ -233,10 +588,13 @@ export default function LocationPage() {
             </View>
 
             <View style={styles.mapViewport}>
-              {hostedMapUrl ? (
+              {localMapHtml ? (
                 <WebView
                   key={mapKey}
-                  source={{ uri: hostedMapUrl }}
+                  source={{
+                    html: localMapHtml,
+                    baseUrl: LOCAL_BAIDU_MAP_BASE_URL,
+                  }}
                   style={styles.map}
                   originWhitelist={["*"]}
                   javaScriptEnabled
@@ -249,25 +607,11 @@ export default function LocationPage() {
                     setMapErrorText("");
                   }}
                   onMessage={onMapMessage}
-                  onHttpError={(event) => {
-                    const failedUrl = event.nativeEvent.url ?? "";
-                    if (!isMainMapDocument(failedUrl)) {
-                      return;
-                    }
-                    setMapStatus("error");
-                    setMapErrorText(
-                      `地图页面返回了 HTTP ${event.nativeEvent.statusCode}，请确认当前服务地址可从手机访问。`,
-                    );
-                  }}
                   onError={(event) => {
-                    const failedUrl = event.nativeEvent.url ?? "";
-                    if (failedUrl && !isMainMapDocument(failedUrl)) {
-                      return;
-                    }
                     setMapStatus("error");
                     setMapErrorText(
                       event.nativeEvent.description ||
-                        "实时地图页面在 WebView 中加载失败。",
+                        "本地地图页面在 WebView 中加载失败。",
                     );
                   }}
                 />
@@ -275,18 +619,22 @@ export default function LocationPage() {
                 <View style={styles.mapFallback}>
                   <Text style={styles.mapFallbackTitle}>实时地图暂不可用</Text>
                   <Text style={styles.mapFallbackText}>
-                    请检查百度地图密钥和当前服务地址配置。
+                    请检查百度地图密钥以及当前空间是否存在有效坐标数据。
                   </Text>
                 </View>
               )}
 
-              {hostedMapUrl && mapStatus === "loading" ? (
+              {localMapHtml && mapStatus === "loading" ? (
                 <View style={styles.loadingMask}>
                   <ActivityIndicator size="small" color="#0A69F5" />
                   <Text style={styles.loadingText}>正在加载实时地图...</Text>
                 </View>
               ) : null}
             </View>
+
+            {mapWarningText ? (
+              <Text style={styles.warningText}>{mapWarningText}</Text>
+            ) : null}
 
             {mapStatus === "error" && mapErrorText ? (
               <Text style={styles.errorText}>{mapErrorText}</Text>
@@ -437,6 +785,12 @@ const styles = StyleSheet.create({
   errorText: {
     marginTop: 10,
     color: "#6B7E96",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  warningText: {
+    marginTop: 10,
+    color: "#8C6A2B",
     fontSize: 12,
     lineHeight: 18,
   },

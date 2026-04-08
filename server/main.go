@@ -1,26 +1,24 @@
-﻿package main
+package main
 
 import (
-	// module name is travel
-	// use other package within the module
 	"fmt"
+	"time"
 	"travel/internal/config"
 	"travel/internal/http"
 	"travel/internal/ws"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-
-	"time"
 )
 
+// main 启动 Gin 服务，供 Expo 客户端在本地开发时访问接口。
 func main() {
 	config.InitConfig()
 	addr := fmt.Sprintf(":%d", config.GlobalConfig.Port)
 
 	r := gin.Default()
 
-	// 为了解决本地开发的 CORS 问题
+	// 本地开发时主要服务移动端接口，并兼容调试阶段的跨域请求。
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins:  true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -32,7 +30,6 @@ func main() {
 
 	r.GET("/hello", http.HttpHello)
 	r.GET("/favicon.ico", http.HttpNoContent)
-	r.GET("/baidu/live-map", http.ServeBaiduLiveMap)
 	r.GET("/ws", ws.WsHello)
 
 	r.Run(addr)

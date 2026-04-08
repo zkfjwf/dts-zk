@@ -9,17 +9,14 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
+	// CheckOrigin 在本地开发阶段保持宽松，方便 Expo 客户端直接连入。
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
 }
 
-// This function establishes a websocket connection from http
-// then send back every message it received
+// WsHello 把 HTTP 请求升级成 WebSocket，并把收到的消息原样回传给客户端。
 func WsHello(c *gin.Context) {
-	// This function name should be Capital uppercase
-	// for other packages to call
-	
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Println("failed to upgrade: ", err)

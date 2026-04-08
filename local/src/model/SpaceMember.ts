@@ -1,21 +1,17 @@
 import { Model } from "@nozbe/watermelondb";
 import { date, field, readonly, text } from "@nozbe/watermelondb/decorators";
 
-// User 对应本地 `users` 表里持久化保存的一条旅行者资料记录。
-export default class User extends Model {
-  static table = "users";
+// SpaceMember 对应用户和旅行空间之间的多对多关系记录。
+export default class SpaceMember extends Model {
+  static table = "space_members";
 
-  // nickname 表示空间列表、动态等场景里展示的昵称。
+  // spaceId 指向所属的旅行空间。
   // @ts-ignore
-  @text("nickname") nickname;
+  @text("space_id") spaceId;
 
-  // avatarLocalUri 指向设备上选中的本地沙盒头像文件。
+  // userId 指向该空间里的成员用户。
   // @ts-ignore
-  @text("avatar_local_uri") avatarLocalUri;
-
-  // avatarRemoteUrl 在没有本地头像时保存一个可回退使用的网络头像地址。
-  // @ts-ignore
-  @text("avatar_remote_url") avatarRemoteUrl;
+  @text("user_id") userId;
 
   // createdAt 记录这条本地数据的创建时间。
   // @ts-ignore

@@ -5,11 +5,14 @@ const HTTP_URL = process.env.EXPO_PUBLIC_API_URL;
 const HELLO_API = HTTP_URL ? `${HTTP_URL}/hello` : "";
 const WS_URL = HTTP_URL ? `${HTTP_URL}/ws` : "";
 
+// NetworkTestPage 用来在 Expo 里手动验证 Go 服务的 HTTP 和 WebSocket 接口。
 export default function NetworkTestPage() {
   const [httpResponse, setHttpResponse] = useState("");
   const [wsMessages, setWsMessages] = useState<string[]>([]);
+  // wsRef 保存当前活动连接，方便页面复用并在退出时安全关闭。
   const wsRef = useRef<WebSocket | null>(null);
 
+  // testHttp 请求 `/hello` 接口，并把返回的 JSON 结果展示到页面上。
   const testHttp = async () => {
     if (!HELLO_API) {
       setHttpResponse("请先设置 EXPO_PUBLIC_API_URL");
@@ -26,6 +29,7 @@ export default function NetworkTestPage() {
     }
   };
 
+  // testWs 首次点击时建立回声连接，后续点击则继续复用连接发消息。
   const testWs = () => {
     if (!WS_URL) {
       setWsMessages((prev) => [...prev, "请先设置 EXPO_PUBLIC_API_URL"]);

@@ -17,44 +17,44 @@ import { getSpaceByCode, type SpaceData } from "./mockApp";
 
 type LedgerExpense = {
   amountYuan: number;
-  payerName: string;
+  payerId: string;
 };
 
 type Settlement = {
-  from: string;
-  to: string;
+  fromId: string;
+  toId: string;
   amount: number;
 };
 
+// calcSettlements 会把所有成员的收支差额压缩成尽量少的转账方案。
 function calcSettlements(
-  members: string[],
+  memberIds: string[],
   expenses: LedgerExpense[],
 ): Settlement[] {
-  if (members.length === 0) {
+  if (memberIds.length === 0) {
     return [];
   }
 
   const paid: Record<string, number> = {};
-  members.forEach((name) => {
-    paid[name] = 0;
+  memberIds.forEach((memberId) => {
+    paid[memberId] = 0;
   });
 
   const total = expenses.reduce((acc, item) => acc + item.amountYuan, 0);
   expenses.forEach((expense) => {
-    paid[expense.payerName] =
-      (paid[expense.payerName] ?? 0) + expense.amountYuan;
+    paid[expense.payerId] = (paid[expense.payerId] ?? 0) + expense.amountYuan;
   });
 
-  const share = total / members.length;
+  const share = total / memberIds.length;
   const creditors: { user: string; amount: number }[] = [];
   const debtors: { user: string; amount: number }[] = [];
 
-  members.forEach((name) => {
-    const net = Number(((paid[name] ?? 0) - share).toFixed(2));
+  memberIds.forEach((memberId) => {
+    const net = Number(((paid[memberId] ?? 0) - share).toFixed(2));
     if (net > 0) {
-      creditors.push({ user: name, amount: net });
+      creditors.push({ user: memberId, amount: net });
     } else if (net < 0) {
-      debtors.push({ user: name, amount: Math.abs(net) });
+      debtors.push({ user: memberId, amount: Math.abs(net) });
     }
   });
 
@@ -71,7 +71,7 @@ function calcSettlements(
     const amount = Number(Math.min(debt.amount, credit.amount).toFixed(2));
 
     if (amount > 0) {
-      result.push({ from: debt.user, to: credit.user, amount });
+      result.push({ fromId: debt.user, toId: credit.user, amount });
     }
 
     debt.amount = Number((debt.amount - amount).toFixed(2));
@@ -88,6 +88,7 @@ function calcSettlements(
   return result;
 }
 
+// SettlementPage 用来展示当前旅程里谁该向谁转账结算。
 export default function SettlementPage() {
   const { code } = useLocalSearchParams<{ code?: string }>();
   const spaceCode = typeof code === "string" ? code : "";
@@ -97,6 +98,7 @@ export default function SettlementPage() {
   );
   const [dbExpenses, setDbExpenses] = useState<LedgerExpense[]>([]);
 
+  // loadDbExpenses 读取规范化账单数据，供结算算法计算使用。
   const loadDbExpenses = useCallback(async (spaceId: string) => {
     const collection = database.collections.get<Expense>("expenses");
     const records = await collection
@@ -104,10 +106,12 @@ export default function SettlementPage() {
       .fetch();
 
     setDbExpenses(
-      records.map((item) => ({
-        amountYuan: item.amount / 100,
-        payerName: item.payerName || item.payerId || "未知成员",
-      })),
+      records
+        .filter((item) => !item.deletedAt)
+        .map((item) => ({
+          amountYuan: item.amount / 100,
+          payerId: item.payerId || "",
+        })),
     );
   }, []);
 
@@ -137,7 +141,10 @@ export default function SettlementPage() {
       return [];
     }
 
-    return calcSettlements(space.members, dbExpenses);
+    const memberIds = space.spaceMembers
+      .filter((item) => !item.deleted_at)
+      .map((item) => item.user_id);
+    return calcSettlements(memberIds, dbExpenses);
   }, [space, dbExpenses]);
 
   const totalTransfer = useMemo(
@@ -145,7 +152,31 @@ export default function SettlementPage() {
     [settlements],
   );
 
-  const memberCount = space?.members.length ?? 0;
+  const memberUsers = useMemo(() => {
+    if (!space) {
+      return [];
+    }
+
+    const memberIds = new Set(
+      space.spaceMembers
+        .filter((item) => !item.deleted_at)
+        .map((item) => item.user_id),
+    );
+
+    return space.users.filter(
+      (user) => !user.deleted_at && memberIds.has(user.id),
+    );
+  }, [space]);
+
+  const userNameById = useMemo(
+    () =>
+      new Map(
+        memberUsers.map((user) => [user.id, user.nickname || "未命名成员"]),
+      ),
+    [memberUsers],
+  );
+
+  const memberCount = memberUsers.length;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -216,7 +247,10 @@ export default function SettlementPage() {
           </View>
         ) : (
           settlements.map((item, idx) => (
-            <View key={`${item.from}-${item.to}-${idx}`} style={styles.card}>
+            <View
+              key={`${item.fromId}-${item.toId}-${idx}`}
+              style={styles.card}
+            >
               <View style={styles.cardTop}>
                 <SoftIconBadge
                   name="card-outline"
@@ -226,7 +260,8 @@ export default function SettlementPage() {
                 />
                 <View style={styles.cardTextWrap}>
                   <Text style={styles.mainText}>
-                    {item.from} 需要支付给 {item.to}
+                    {userNameById.get(item.fromId) || "成员"} 需要支付给{" "}
+                    {userNameById.get(item.toId) || "成员"}
                   </Text>
                   <Text style={styles.subText}>
                     建议当面确认或备注旅程结算。

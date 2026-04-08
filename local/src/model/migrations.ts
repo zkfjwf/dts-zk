@@ -2,8 +2,10 @@ import {
   addColumns,
   createTable,
   schemaMigrations,
+  unsafeExecuteSql,
 } from "@nozbe/watermelondb/Schema/migrations";
 
+// migrations 负责把旧版本本地数据库升级到当前最新的规范化结构。
 export default schemaMigrations({
   migrations: [
     {
@@ -61,6 +63,125 @@ export default schemaMigrations({
             { name: "updated_at", type: "number" },
           ],
         }),
+      ],
+    },
+    {
+      toVersion: 5,
+      steps: [
+        addColumns({
+          table: "users",
+          columns: [{ name: "deleted_at", type: "number", isOptional: true }],
+        }),
+        createTable({
+          name: "space_members",
+          columns: [
+            { name: "space_id", type: "string", isIndexed: true },
+            { name: "user_id", type: "string", isIndexed: true },
+            { name: "created_at", type: "number" },
+            { name: "updated_at", type: "number" },
+            { name: "deleted_at", type: "number", isOptional: true },
+          ],
+        }),
+        addColumns({
+          table: "spaces",
+          columns: [
+            { name: "name", type: "string" },
+            { name: "updated_at", type: "number" },
+          ],
+        }),
+        addColumns({
+          table: "expenses",
+          columns: [{ name: "deleted_at", type: "number", isOptional: true }],
+        }),
+        addColumns({
+          table: "photos",
+          columns: [
+            { name: "local_uri", type: "string", isOptional: true },
+            { name: "shoted_at", type: "number" },
+            { name: "deleted_at", type: "number", isOptional: true },
+          ],
+        }),
+        addColumns({
+          table: "posts",
+          columns: [
+            { name: "poster_id", type: "string" },
+            { name: "deleted_at", type: "number", isOptional: true },
+          ],
+        }),
+        createTable({
+          name: "comments",
+          columns: [
+            { name: "content", type: "string" },
+            { name: "commenter_id", type: "string" },
+            { name: "post_id", type: "string", isIndexed: true },
+            { name: "commented_at", type: "number" },
+            { name: "created_at", type: "number" },
+            { name: "updated_at", type: "number" },
+            { name: "deleted_at", type: "number", isOptional: true },
+          ],
+        }),
+        unsafeExecuteSql(`
+          update "users"
+          set "id" = "user_id"
+          where "user_id" is not null
+            and "user_id" != ''
+            and "id" != "user_id";
+          update "spaces"
+          set "id" = "space_id"
+          where "space_id" is not null
+            and "space_id" != ''
+            and "id" != "space_id";
+          update "spaces"
+          set "name" = case
+              when "title" is not null and "title" != '' then "title"
+              else "name"
+            end,
+            "updated_at" = case
+              when "update_at" is not null and "update_at" != 0 then "update_at"
+              else "created_at"
+            end;
+          update "photos"
+          set "local_uri" = case
+              when "local_path" is not null and "local_path" != '' then "local_path"
+              else "remote_url"
+            end,
+            "shoted_at" = case
+              when "created_at" is not null and "created_at" != 0 then "created_at"
+              else strftime('%s','now') * 1000
+            end;
+          update "posts"
+          set "poster_id" = case
+              when "uploader_id" is not null and "uploader_id" != '' then "uploader_id"
+              else "poster_id"
+            end;
+          insert or ignore into "comments" (
+            "id",
+            "_status",
+            "_changed",
+            "content",
+            "commenter_id",
+            "post_id",
+            "commented_at",
+            "created_at",
+            "updated_at",
+            "deleted_at"
+          )
+          select
+            "id",
+            coalesce("_status", 'synced'),
+            coalesce("_changed", ''),
+            coalesce("text", ''),
+            coalesce("author_id", ''),
+            coalesce("post_id", ''),
+            case
+              when "created_at" is not null and "created_at" != 0 then "created_at"
+              else strftime('%s','now') * 1000
+            end,
+            coalesce("created_at", strftime('%s','now') * 1000),
+            coalesce("updated_at", coalesce("created_at", strftime('%s','now') * 1000)),
+            null
+          from "post_comments";
+        `),
       ],
     },
   ],
