@@ -15,7 +15,7 @@ import {
   getSpaceByCode,
   simulateOtherMembersLocation,
   type SpaceData,
-} from "./mockApp";
+} from "@/features/travel/mockApp";
 
 // MapPoint 是位置页真正交给 WebView 地图脚本渲染的点位结构。
 type MapPoint = {
@@ -38,6 +38,20 @@ type MapEvent =
 // 这是本地 WebView 使用的虚拟页面来源，并不对应真实线上域名。
 const LOCAL_BAIDU_MAP_PAGE_ORIGIN = "https://travel-map.local";
 const LOCAL_BAIDU_MAP_BASE_URL = `${LOCAL_BAIDU_MAP_PAGE_ORIGIN}/`;
+
+const mapPalette = {
+  background: "#EFF9F2",
+  surface: "rgba(255,255,255,0.72)",
+  surfaceStrong: "rgba(255,255,255,0.86)",
+  border: "rgba(199,231,211,0.92)",
+  text: "#0F172A",
+  muted: "#64748B",
+  primary: "#60C28E",
+  secondary: "#3E9E6C",
+  success: "#34D399",
+  warning: "#F59E0B",
+  shadow: "#BFDCCC",
+};
 
 // 从 Expo 公共环境变量里读取浏览器端百度地图密钥。
 function getBaiduAk() {
@@ -92,7 +106,7 @@ function buildLocalMapHtml(ak: string, points: MapPoint[]) {
         padding: 0;
         width: 100%;
         height: 100%;
-        background: #edf3fb;
+        background: #eef2ff;
         overflow: hidden;
       }
     </style>
@@ -120,7 +134,7 @@ function buildLocalMapHtml(ak: string, points: MapPoint[]) {
 
       function formatInfo(item) {
         return (
-          '<div style="min-width:180px;color:#1f2d44;font-size:13px;line-height:1.65;">' +
+          '<div style="min-width:180px;color:#0f172a;font-size:13px;line-height:1.65;">' +
           '<div style="font-weight:700;font-size:14px;margin-bottom:4px;">' +
           item.username +
           (item.isCurrentUser ? "（我）" : "") +
@@ -248,7 +262,7 @@ function buildLocalMapHtml(ak: string, points: MapPoint[]) {
           if (item.isCurrentUser) {
             const icon = new window.BMap.Symbol(window.BMap_Symbol_SHAPE_POINT, {
               scale: 1.3,
-              fillColor: "#0A69F5",
+              fillColor: "#60C28E",
               fillOpacity: 1,
               strokeColor: "#FFFFFF",
               strokeWeight: 3,
@@ -268,14 +282,14 @@ function buildLocalMapHtml(ak: string, points: MapPoint[]) {
           );
 
           label.setStyle({
-            color: "#1f2d44",
-            backgroundColor: "#ffffff",
-            border: "1px solid #d2deeb",
+            color: "#0f172a",
+            backgroundColor: "rgba(255,255,255,0.92)",
+            border: "1px solid rgba(199,231,211,0.92)",
             borderRadius: "999px",
             padding: "4px 8px",
             fontSize: "12px",
             fontWeight: "600",
-            boxShadow: "0 4px 16px rgba(15,23,42,0.12)",
+            boxShadow: "0 10px 24px rgba(96,194,142,0.16)",
           });
 
           marker.setLabel(label);
@@ -543,7 +557,7 @@ export default function LocationPage() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>行程位置共享</Text>
+          <Text style={styles.title}>位置共享</Text>
           <Pressable
             style={styles.backButton}
             onPress={() =>
@@ -564,16 +578,6 @@ export default function LocationPage() {
               <Text style={styles.noticeTitle}>缺少百度地图密钥</Text>
               <Text style={styles.noticeText}>
                 请先在 `.env` 中配置 `EXPO_PUBLIC_BAIDU_MAP_AK`。
-              </Text>
-            </View>
-          ) : null}
-
-          {baiduAk ? (
-            <View style={styles.noticeCard}>
-              <Text style={styles.noticeTitle}>地图已改为本地渲染</Text>
-              <Text style={styles.noticeText}>
-                当前位置页会直接在本地 WebView
-                中加载百度地图，不再请求你们自己的服务器地图页。
               </Text>
             </View>
           ) : null}
@@ -633,7 +637,7 @@ export default function LocationPage() {
 
               {localMapHtml && mapStatus === "loading" ? (
                 <View style={styles.loadingMask}>
-                  <ActivityIndicator size="small" color="#0A69F5" />
+                  <ActivityIndicator size="small" color={mapPalette.primary} />
                   <Text style={styles.loadingText}>正在加载实时地图...</Text>
                 </View>
               ) : null}
@@ -649,7 +653,7 @@ export default function LocationPage() {
           </View>
 
           <View style={styles.memberHeader}>
-            <Text style={styles.memberTitle}>同行成员</Text>
+            <Text style={styles.memberTitle}>空间成员</Text>
             <Text style={styles.memberCount}>
               共 {space.locations.length} 人
             </Text>
@@ -675,7 +679,7 @@ export default function LocationPage() {
                           : styles.memberTagText
                       }
                     >
-                      {isCurrentUser ? "当前设备" : "同行成员"}
+                      {isCurrentUser ? "当前设备" : "空间成员"}
                     </Text>
                   </View>
                 </View>
@@ -697,11 +701,11 @@ export default function LocationPage() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#EAF1FA" },
+  safeArea: { flex: 1, backgroundColor: mapPalette.background },
   container: {
     flex: 1,
     paddingHorizontal: 18,
-    paddingTop: 20,
+    paddingTop: 18,
   },
   header: {
     flexDirection: "row",
@@ -709,51 +713,74 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 14,
   },
-  title: { fontSize: 28, fontWeight: "800", color: "#1A2940" },
+  title: { fontSize: 28, fontWeight: "800", color: mapPalette.text },
   backButton: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#8EADE0",
+    borderColor: mapPalette.border,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    backgroundColor: "rgba(255,255,255,0.92)",
+    backgroundColor: mapPalette.surfaceStrong,
+    shadowColor: mapPalette.shadow,
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
-  backButtonText: { color: "#2A549D", fontWeight: "700", fontSize: 13 },
+  backButtonText: {
+    color: mapPalette.primary,
+    fontWeight: "700",
+    fontSize: 13,
+  },
   scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 18 },
   noticeCard: {
-    borderRadius: 16,
-    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    backgroundColor: mapPalette.surface,
     padding: 14,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: mapPalette.border,
+    shadowColor: mapPalette.shadow,
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
-  noticeTitle: { color: "#1F2D44", fontWeight: "700", fontSize: 14 },
-  noticeText: { marginTop: 6, color: "#5A708D", fontSize: 13, lineHeight: 18 },
+  noticeTitle: { color: mapPalette.text, fontWeight: "700", fontSize: 14 },
+  noticeText: {
+    marginTop: 6,
+    color: mapPalette.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   mapCard: {
-    borderRadius: 22,
-    backgroundColor: "#FFFFFF",
+    borderRadius: 28,
+    backgroundColor: mapPalette.surface,
     padding: 16,
     marginBottom: 16,
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
+    borderWidth: 1,
+    borderColor: mapPalette.border,
+    shadowColor: mapPalette.shadow,
+    shadowOpacity: 0.16,
+    shadowRadius: 22,
     shadowOffset: { width: 0, height: 8 },
     elevation: 4,
   },
   mapCardHeader: { marginBottom: 12 },
-  mapTitle: { color: "#1A2940", fontSize: 18, fontWeight: "800" },
-  mapHint: { marginTop: 6, color: "#6B7E96", fontSize: 13 },
+  mapTitle: { color: mapPalette.text, fontSize: 18, fontWeight: "800" },
+  mapHint: { marginTop: 6, color: mapPalette.muted, fontSize: 13 },
   mapViewport: {
     height: 430,
-    borderRadius: 18,
+    borderRadius: 22,
     overflow: "hidden",
-    backgroundColor: "#EDF3FB",
+    backgroundColor: "#EAF7EF",
     position: "relative",
   },
   map: {
     width: "100%",
     height: "100%",
-    backgroundColor: "#EDF3FB",
+    backgroundColor: "#EAF7EF",
   },
   mapFallback: {
     flex: 1,
@@ -762,13 +789,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   mapFallbackTitle: {
-    color: "#1F2D44",
+    color: mapPalette.text,
     fontSize: 16,
     fontWeight: "700",
   },
   mapFallbackText: {
     marginTop: 8,
-    color: "#60738C",
+    color: mapPalette.muted,
     fontSize: 13,
     lineHeight: 19,
     textAlign: "center",
@@ -779,25 +806,25 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: "rgba(255,255,255,0.66)",
+    backgroundColor: "rgba(248,250,252,0.64)",
     alignItems: "center",
     justifyContent: "center",
   },
   loadingText: {
     marginTop: 8,
-    color: "#2A4F95",
+    color: mapPalette.primary,
     fontSize: 13,
     fontWeight: "600",
   },
   errorText: {
     marginTop: 10,
-    color: "#6B7E96",
+    color: "#E11D48",
     fontSize: 12,
     lineHeight: 18,
   },
   warningText: {
     marginTop: 10,
-    color: "#8C6A2B",
+    color: mapPalette.warning,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -807,16 +834,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  memberTitle: { color: "#1A2940", fontSize: 16, fontWeight: "800" },
-  memberCount: { color: "#6B7E96", fontSize: 12, fontWeight: "600" },
+  memberTitle: { color: mapPalette.text, fontSize: 16, fontWeight: "800" },
+  memberCount: { color: mapPalette.muted, fontSize: 12, fontWeight: "600" },
   memberCard: {
-    borderRadius: 18,
-    backgroundColor: "#FFFFFF",
+    borderRadius: 22,
+    backgroundColor: mapPalette.surface,
     padding: 14,
     marginBottom: 12,
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: mapPalette.border,
+    shadowColor: mapPalette.shadow,
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
@@ -826,35 +855,39 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  memberName: { color: "#1F2D44", fontSize: 15, fontWeight: "700" },
+  memberName: { color: mapPalette.text, fontSize: 15, fontWeight: "700" },
   memberInfo: {
     marginTop: 8,
-    color: "#5A708D",
+    color: mapPalette.muted,
     fontSize: 13,
     lineHeight: 19,
   },
   memberTag: {
     borderRadius: 999,
-    backgroundColor: "#F1F6FC",
+    backgroundColor: "rgba(255,255,255,0.78)",
     paddingHorizontal: 10,
     paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: mapPalette.border,
   },
-  memberTagText: { color: "#60738C", fontSize: 12, fontWeight: "700" },
+  memberTagText: { color: mapPalette.muted, fontSize: 12, fontWeight: "700" },
   selfTag: {
     borderRadius: 999,
-    backgroundColor: "#E7F3FF",
+    backgroundColor: "rgba(52,211,153,0.14)",
     paddingHorizontal: 10,
     paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "rgba(52,211,153,0.3)",
   },
-  selfTagText: { color: "#0A69F5", fontSize: 12, fontWeight: "700" },
+  selfTagText: { color: mapPalette.success, fontSize: 12, fontWeight: "700" },
   refreshButton: {
     marginTop: 10,
-    borderRadius: 16,
-    backgroundColor: "#0A69F5",
+    borderRadius: 18,
+    backgroundColor: mapPalette.primary,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 14,
-    shadowColor: "#0A69F5",
+    shadowColor: mapPalette.primary,
     shadowOpacity: 0.25,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
@@ -872,7 +905,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   emptyTitle: {
-    color: "#1D2B42",
+    color: mapPalette.text,
     fontWeight: "700",
     fontSize: 22,
     marginBottom: 14,

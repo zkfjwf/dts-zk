@@ -1,31 +1,29 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import { SoftIconBadge } from "@/components/SoftIconBadge";
-import { getCurrentUser } from "./mockApp";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { getCurrentUser } from "@/features/travel/mockApp";
 import {
   ensureCurrentUserProfileInDb,
   getCurrentUserProfileFromDb,
   updateCurrentUserAvatarInDb,
   updateCurrentUserNicknameInDb,
   type UserProfileData,
-} from "./userDb";
-import { saveImageToAlbum, saveImageToLocalDir } from "@/lib/imageStorage";
+} from "@/features/travel/userDb";
+import { saveImageToAlbum } from "@/lib/imageStorage";
 
-// ImagePickerModule 只声明当前页面实际会用到的 Expo 选图接口。
 type ImagePickerModule = {
   launchImageLibraryAsync: (options: Record<string, unknown>) => Promise<{
     canceled: boolean;
@@ -33,10 +31,26 @@ type ImagePickerModule = {
   }>;
 };
 
-// imagePickerModuleCache 缓存一次 require 结果，避免每次点按钮都重复加载模块。
 let imagePickerModuleCache: ImagePickerModule | null | undefined;
 
-// 懒加载图片选择模块，避免测试环境缺少原生模块时报错。
+const profilePalette = {
+  background: "#F4FBF6",
+  orbPrimary: "rgba(96,194,142,0.16)",
+  orbSecondary: "rgba(168,225,192,0.12)",
+  surface: "#F3F5FB",
+  surfaceRaised: "#FFFFFF",
+  border: "#DDEDE3",
+  text: "#1E2438",
+  muted: "#6F7897",
+  softText: "#9AA4C0",
+  primary: "#60C28E",
+  secondary: "#3E9E6C",
+  success: "#34D399",
+  shadowDark: "#D3E4DA",
+  shadowLight: "#FFFFFF",
+};
+
+// 懒加载选图模块，避免测试环境里缺少原生能力时报错。
 function getImagePickerModule() {
   if (imagePickerModuleCache !== undefined) {
     return imagePickerModuleCache;
@@ -50,9 +64,12 @@ function getImagePickerModule() {
   return imagePickerModuleCache;
 }
 
-// 头像组件优先显示图片，失败时退回到昵称末位字。
+// 头像优先显示图片，失败时退回到昵称最后一个字。
 function Avatar({ uri, name }: { uri: string; name: string }) {
   const [loadFailed, setLoadFailed] = useState(false);
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [uri]);
   const fallbackText = name.trim().slice(-1) || "旅";
 
   if (loadFailed || !uri) {
@@ -72,25 +89,28 @@ function Avatar({ uri, name }: { uri: string; name: string }) {
   );
 }
 
-// 个人资料页负责编辑昵称、更新头像，并支持导出头像到系统相册。
 export default function ProfilePage() {
-  // current 是 mock 领域里的当前用户基线信息，作为本地资料缺失时的回退来源。
+  // current 是 mock 层里的当前用户，用来做本地资料缺失时的兜底展示。
   const current = useMemo(() => getCurrentUser(), []);
-  // profile 是从本地数据库里读取出的规范化用户资料。
+  // profile 是 WatermelonDB 里规范化后的用户资料。
   const [profile, setProfile] = useState<UserProfileData | null>(null);
   // nicknameInput 保存昵称输入框的草稿内容。
   const [nicknameInput, setNicknameInput] = useState("");
-  // savingProfile 避免重复点击保存昵称或头像时触发并发写入。
+  // savingProfile 避免重复提交昵称或头像修改。
   const [savingProfile, setSavingProfile] = useState(false);
-  // savingAvatarToAlbum 表示“保存头像到系统相册”动作是否仍在进行中。
+  // savingAvatarToAlbum 表示“保存头像到相册”动作是否还在进行中。
   const [savingAvatarToAlbum, setSavingAvatarToAlbum] = useState(false);
 
-  // avatarUri 优先展示本地头像，若没有再回退到远程头像地址。
   const avatarUri = profile?.avatarLocalUri || profile?.avatarRemoteUrl || "";
-  // displayName 让页面标题和头像回退字始终有稳定显示内容。
+  const avatarDisplayUri =
+    profile?.avatarDisplayUri ||
+    profile?.avatarLocalUri ||
+    profile?.avatarRemoteUrl ||
+    "";
   const displayName = profile?.nickname || current.username;
+  const userId = profile?.id || current.id;
 
-  // 确保当前用户在本地数据库中存在，并刷新页面表单数据。
+  // 读取并刷新当前用户在本地数据库中的资料。
   const loadProfile = useCallback(async () => {
     await ensureCurrentUserProfileInDb();
     const row = await getCurrentUserProfileFromDb();
@@ -104,7 +124,7 @@ export default function ProfilePage() {
     }, [loadProfile]),
   );
 
-  // 保存昵称时同时同步更新 mock 空间里依赖昵称的展示。
+  // 保存昵称，并同步更新到空间里依赖昵称展示的地方。
   const onSaveNickname = async () => {
     const clean = nicknameInput.trim();
     if (!clean) {
@@ -125,7 +145,7 @@ export default function ProfilePage() {
     }
   };
 
-  // 选择头像后先把图片复制进应用沙盒，再更新本地资料记录。
+  // 从系统相册选择一张图片，并更新当前用户头像。
   const onPickAvatar = async () => {
     const imagePicker = getImagePickerModule();
     if (!imagePicker) {
@@ -149,13 +169,9 @@ export default function ProfilePage() {
       }
 
       setSavingProfile(true);
-      const localAvatarUri = await saveImageToLocalDir(
-        result.assets[0].uri,
-        "travel-avatar",
-      );
-      const next = await updateCurrentUserAvatarInDb(localAvatarUri);
+      const next = await updateCurrentUserAvatarInDb(result.assets[0].uri);
       setProfile(next);
-      Alert.alert("已保存", "头像已经更新，旅行空间里的动态头像会同步刷新。");
+      Alert.alert("已保存", "头像已经更新。");
     } catch (error) {
       Alert.alert("头像更新失败", String(error));
     } finally {
@@ -163,7 +179,7 @@ export default function ProfilePage() {
     }
   };
 
-  // 把当前头像导出到系统相册。
+  // 把当前头像保存到系统相册。
   const onSaveAvatarToAlbum = async () => {
     if (!avatarUri) {
       return;
@@ -180,7 +196,7 @@ export default function ProfilePage() {
     }
   };
 
-  // 优先返回上一级；如果当前没有返回栈，就退回首页。
+  // 优先返回上一页；没有返回栈时回到首页。
   const goBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -191,6 +207,9 @@ export default function ProfilePage() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <View style={styles.backgroundOrbTop} />
+      <View style={styles.backgroundOrbBottom} />
+
       <KeyboardAvoidingView
         style={styles.keyboardWrap}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -200,127 +219,113 @@ export default function ProfilePage() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>个人资料</Text>
-              <Text style={styles.subtitle}>
-                保持头像与昵称统一，你的动态会自动同步展示。
-              </Text>
-            </View>
+          <View style={styles.headerRow}>
             <Pressable style={styles.backButton} onPress={goBack}>
-              <Ionicons name="chevron-back" size={18} color="#2E4463" />
-              <Text style={styles.backButtonText}>返回</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.heroCard}>
-            <Avatar uri={avatarUri} name={displayName} />
-            <Text style={styles.displayName}>{displayName}</Text>
-            <Text style={styles.helperText}>
-              当前头像会同步到春日旅行空间的动态列表。
-            </Text>
-            <View style={styles.profileMetaRow}>
-              <View style={styles.profileMetaCard}>
-                <SoftIconBadge
-                  name="person-outline"
-                  tone="sky"
-                  size={46}
-                  iconSize={20}
-                />
-                <Text style={styles.profileMetaLabel}>旅行昵称</Text>
-              </View>
-              <View style={styles.profileMetaCard}>
-                <SoftIconBadge
-                  name="images-outline"
-                  tone="violet"
-                  size={46}
-                  iconSize={20}
-                />
-                <Text style={styles.profileMetaLabel}>头像同步</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.formCard}>
-            <View style={styles.sectionHeader}>
-              <SoftIconBadge
-                name="sparkles-outline"
-                tone="aqua"
-                size={48}
-                iconSize={20}
+              <Ionicons
+                name="chevron-back"
+                size={18}
+                color={profilePalette.primary}
               />
-              <View style={styles.sectionHeaderTextWrap}>
-                <Text style={styles.sectionTitle}>编辑资料</Text>
-                <Text style={styles.sectionSubtitle}>
-                  使用简洁的信息卡片，让个人主页更轻松。
-                </Text>
+            </Pressable>
+            <Text style={styles.pageTitle}>个人资料</Text>
+            <View style={styles.headerPlaceholder} />
+          </View>
+
+          <View style={styles.profileCard}>
+            <View style={styles.profileMainRow}>
+              <Avatar uri={avatarDisplayUri} name={displayName} />
+
+              <View style={styles.profileTextWrap}>
+                <Text style={styles.displayName}>{displayName}</Text>
+                <Text style={styles.userIdText}>ID号 · {userId}</Text>
+              </View>
+
+              <View style={styles.profileActionColumn}>
+                <Pressable
+                  style={styles.iconButton}
+                  onPress={() => void onPickAvatar()}
+                  disabled={savingProfile || savingAvatarToAlbum}
+                >
+                  <Ionicons
+                    name="camera-outline"
+                    size={18}
+                    color={profilePalette.primary}
+                  />
+                </Pressable>
+                <Pressable
+                  style={styles.iconButton}
+                  onPress={() => void onSaveAvatarToAlbum()}
+                  disabled={!avatarUri || savingProfile || savingAvatarToAlbum}
+                >
+                  <Ionicons
+                    name="download-outline"
+                    size={18}
+                    color={profilePalette.primary}
+                  />
+                </Pressable>
               </View>
             </View>
 
-            <Text style={styles.label}>昵称</Text>
-            <TextInput
-              value={nicknameInput}
-              onChangeText={setNicknameInput}
-              placeholder="输入你的旅行昵称"
-              placeholderTextColor="#9AACC0"
-              style={styles.input}
-              maxLength={24}
-            />
-
-            <Text style={styles.label}>用户账号</Text>
-            <View style={styles.valueCard}>
-              <Text style={styles.valueText}>{profile?.id || current.id}</Text>
-            </View>
-
-            <View style={styles.buttonGroup}>
-              <Pressable
-                style={styles.secondaryButton}
-                onPress={() => void onPickAvatar()}
-                disabled={savingProfile || savingAvatarToAlbum}
-              >
-                <SoftIconBadge
-                  name="camera-outline"
-                  tone="peach"
-                  size={40}
-                  iconSize={18}
-                />
-                <Text style={styles.secondaryButtonText}>
-                  {savingProfile ? "处理中..." : "选择头像"}
-                </Text>
-              </Pressable>
+            <View style={styles.editorBlock}>
+              <TextInput
+                value={nicknameInput}
+                onChangeText={setNicknameInput}
+                placeholder="输入你的昵称"
+                placeholderTextColor={profilePalette.softText}
+                style={styles.input}
+                maxLength={24}
+              />
 
               <Pressable
-                style={styles.secondaryButton}
-                onPress={() => void onSaveAvatarToAlbum()}
-                disabled={!avatarUri || savingProfile || savingAvatarToAlbum}
-              >
-                <SoftIconBadge
-                  name="download-outline"
-                  tone="sky"
-                  size={40}
-                  iconSize={18}
-                />
-                <Text style={styles.secondaryButtonText}>
-                  {savingAvatarToAlbum ? "保存中..." : "保存头像到相册"}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={styles.primaryButton}
+                style={[
+                  styles.saveButton,
+                  (savingProfile || savingAvatarToAlbum) &&
+                    styles.disabledButton,
+                ]}
                 onPress={() => void onSaveNickname()}
                 disabled={savingProfile || savingAvatarToAlbum}
               >
-                <SoftIconBadge
-                  name="checkmark-outline"
-                  tone="mint"
-                  size={40}
-                  iconSize={18}
-                />
-                <Text style={styles.primaryButtonText}>
+                <Text style={styles.saveButtonText}>
                   {savingProfile ? "保存中..." : "保存资料"}
                 </Text>
               </Pressable>
             </View>
+          </View>
+
+          <View style={styles.actionCard}>
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => void onPickAvatar()}
+              disabled={savingProfile || savingAvatarToAlbum}
+            >
+              <View style={styles.actionIconWrap}>
+                <Ionicons
+                  name="image-outline"
+                  size={18}
+                  color={profilePalette.primary}
+                />
+              </View>
+              <Text style={styles.actionText}>
+                {savingProfile ? "处理中..." : "重新选择头像"}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => void onSaveAvatarToAlbum()}
+              disabled={!avatarUri || savingProfile || savingAvatarToAlbum}
+            >
+              <View style={styles.actionIconWrap}>
+                <Ionicons
+                  name="download-outline"
+                  size={18}
+                  color={profilePalette.primary}
+                />
+              </View>
+              <Text style={styles.actionText}>
+                {savingAvatarToAlbum ? "保存中..." : "保存头像到相册"}
+              </Text>
+            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -329,219 +334,206 @@ export default function ProfilePage() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#F4F7FB" },
-  keyboardWrap: { flex: 1 },
+  safeArea: {
+    flex: 1,
+    backgroundColor: profilePalette.background,
+  },
+  backgroundOrbTop: {
+    position: "absolute",
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    backgroundColor: profilePalette.orbPrimary,
+    top: -112,
+    right: -90,
+  },
+  backgroundOrbBottom: {
+    position: "absolute",
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: profilePalette.orbSecondary,
+    bottom: -130,
+    left: -76,
+  },
+  keyboardWrap: {
+    flex: 1,
+  },
   scrollContent: {
     paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: 32,
-    gap: 18,
+    paddingTop: 10,
+    paddingBottom: 36,
+    gap: 16,
   },
-  header: {
+  headerRow: {
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  title: {
-    color: "#1D2C40",
-    fontSize: 30,
-    fontWeight: "800",
-  },
-  subtitle: {
-    marginTop: 10,
-    color: "#6E8198",
-    fontSize: 14,
-    lineHeight: 22,
-    maxWidth: 250,
   },
   backButton: {
-    flexDirection: "row",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
-    gap: 6,
-    borderRadius: 999,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "#E5ECF6",
-    shadowColor: "#CCD8E8",
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
-  },
-  backButtonText: {
-    color: "#2E4463",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  heroCard: {
-    borderRadius: 28,
-    backgroundColor: "#FFFFFF",
-    padding: 22,
-    alignItems: "center",
-    shadowColor: "#C5D3E2",
-    shadowOpacity: 0.14,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 5,
-  },
-  avatar: {
-    width: 112,
-    height: 112,
-    borderRadius: 56,
-    backgroundColor: "#DFE9F7",
-  },
-  avatarFallback: {
-    width: 112,
-    height: 112,
-    borderRadius: 56,
-    backgroundColor: "#4D7CFE",
     justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#4D7CFE",
-    shadowOpacity: 0.22,
-    shadowRadius: 22,
+    backgroundColor: profilePalette.surface,
+    borderWidth: 1,
+    borderColor: profilePalette.border,
+    shadowColor: profilePalette.shadowLight,
+    shadowOpacity: 0.95,
+    shadowRadius: 8,
+    shadowOffset: { width: -3, height: -3 },
+    elevation: 2,
+  },
+  pageTitle: {
+    color: profilePalette.text,
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  headerPlaceholder: {
+    width: 40,
+    height: 40,
+  },
+  profileCard: {
+    borderRadius: 30,
+    backgroundColor: profilePalette.surface,
+    borderWidth: 1,
+    borderColor: profilePalette.border,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    shadowColor: profilePalette.shadowDark,
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
     shadowOffset: { width: 0, height: 14 },
     elevation: 5,
   },
+  profileMainRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  avatar: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: profilePalette.surfaceRaised,
+  },
+  avatarFallback: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: profilePalette.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   avatarFallbackText: {
     color: "#FFFFFF",
-    fontSize: 42,
+    fontSize: 30,
     fontWeight: "800",
   },
+  profileTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
   displayName: {
-    marginTop: 16,
-    color: "#1F3045",
+    color: profilePalette.text,
     fontSize: 24,
     fontWeight: "800",
   },
-  helperText: {
+  userIdText: {
     marginTop: 8,
-    color: "#71849D",
-    fontSize: 13,
-    lineHeight: 20,
-    textAlign: "center",
-  },
-  profileMetaRow: {
-    marginTop: 18,
-    flexDirection: "row",
-    gap: 12,
-    width: "100%",
-  },
-  profileMetaCard: {
-    flex: 1,
-    borderRadius: 22,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    backgroundColor: "#F8FBFF",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#EEF2F8",
-    gap: 8,
-  },
-  profileMetaLabel: {
-    color: "#5E728D",
+    color: profilePalette.muted,
     fontSize: 12,
     fontWeight: "600",
   },
-  formCard: {
-    borderRadius: 28,
-    backgroundColor: "#FFFFFF",
-    padding: 20,
-    shadowColor: "#C5D3E2",
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 4,
+  profileActionColumn: {
+    gap: 10,
   },
-  sectionHeader: {
-    flexDirection: "row",
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
-    gap: 12,
+    justifyContent: "center",
+    backgroundColor: profilePalette.surfaceRaised,
+    borderWidth: 1,
+    borderColor: profilePalette.border,
+    shadowColor: profilePalette.shadowDark,
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
-  sectionHeaderTextWrap: {
-    flex: 1,
-  },
-  sectionTitle: {
-    color: "#203044",
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  sectionSubtitle: {
-    marginTop: 4,
-    color: "#7387A0",
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  label: {
-    color: "#637790",
-    fontSize: 13,
-    fontWeight: "600",
+  editorBlock: {
     marginTop: 18,
-    marginBottom: 8,
+    gap: 12,
   },
   input: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
+    borderRadius: 18,
+    paddingHorizontal: 14,
     paddingVertical: 14,
-    backgroundColor: "#F8FBFF",
+    backgroundColor: profilePalette.surfaceRaised,
     borderWidth: 1,
-    borderColor: "#E6EDF7",
-    color: "#23364D",
+    borderColor: profilePalette.border,
+    color: profilePalette.text,
     fontSize: 15,
   },
-  valueCard: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: "#F8FBFF",
-    borderWidth: 1,
-    borderColor: "#EAF0F8",
-  },
-  valueText: {
-    color: "#24364D",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  buttonGroup: {
-    marginTop: 22,
-    gap: 12,
-  },
-  secondaryButton: {
-    flexDirection: "row",
+  saveButton: {
+    borderRadius: 18,
+    backgroundColor: profilePalette.primary,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
-    borderRadius: 22,
-    paddingVertical: 13,
-    backgroundColor: "#F7FAFF",
-    borderWidth: 1,
-    borderColor: "#E4EBF5",
-  },
-  secondaryButtonText: {
-    color: "#2A3E57",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  primaryButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    borderRadius: 22,
-    paddingVertical: 13,
-    backgroundColor: "#4D7CFE",
-    shadowColor: "#4D7CFE",
-    shadowOpacity: 0.24,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 12 },
+    paddingVertical: 14,
+    shadowColor: profilePalette.primary,
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 4,
   },
-  primaryButtonText: {
+  saveButtonText: {
     color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "800",
+  },
+  actionCard: {
+    borderRadius: 28,
+    backgroundColor: profilePalette.surface,
+    borderWidth: 1,
+    borderColor: profilePalette.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 12,
+    shadowColor: profilePalette.shadowDark,
+    shadowOpacity: 0.14,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 18,
+    backgroundColor: profilePalette.surfaceRaised,
+    borderWidth: 1,
+    borderColor: profilePalette.border,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  actionIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: profilePalette.surface,
+  },
+  actionText: {
+    color: profilePalette.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });

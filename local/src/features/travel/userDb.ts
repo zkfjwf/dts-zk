@@ -1,44 +1,46 @@
 import { database } from "@/model";
 import User from "@/model/User";
 import { assignModelId } from "@/lib/watermelon";
+import { readProfileAssets, saveProfileAvatarAsset } from "@/lib/profileAssets";
 import {
   getCurrentUser,
   updateCurrentUserProfile,
   type UserProfile,
-} from "./mockApp";
+} from "@/features/travel/mockApp";
 
 export type UserProfileData = {
   // id 与 mock/current user 的业务主键保持一致，便于跨层同步。
   id: string;
   // nickname 是大厅、动态、位置页等场景统一展示的昵称。
   nickname: string;
-  // avatarLocalUri 指向用户从相册选中后复制进沙盒的头像文件。
+  // avatarLocalUri 来自独立的前端本地文件存储，不再放在 WatermelonDB 里。
   avatarLocalUri: string;
-  // avatarRemoteUrl 保存一个可回退使用的线上头像地址。
+  // avatarRemoteUrl 作为没有本地头像时的回退地址，来源于当前用户基线资料。
   avatarRemoteUrl: string;
-  // deletedAt 预留给未来同步删除或注销场景。
-  deletedAt: number | null;
+  // avatarDisplayUri 专门给 React Native 渲染使用，必要时会附带版本号绕过缓存。
+  avatarDisplayUri: string;
 };
 
-// toData 把 Watermelon 的用户记录转换成页面更容易使用的资料结构。
-function toData(row: User): UserProfileData {
+// toData 把 Watermelon 的昵称记录和本地头像资产拼成页面真正需要的结构。
+async function toData(
+  row: User,
+  current: UserProfile,
+): Promise<UserProfileData> {
+  const assets = await readProfileAssets(row.id);
   return {
     id: row.id,
     nickname: row.nickname || "未命名用户",
-    avatarLocalUri: row.avatarLocalUri || "",
-    avatarRemoteUrl: row.avatarRemoteUrl || "",
-    deletedAt: typeof row.deletedAt === "number" ? row.deletedAt : null,
+    avatarLocalUri: assets.avatarLocalUri,
+    avatarRemoteUrl: current.avatarUrl || "",
+    avatarDisplayUri: assets.avatarDisplayUri || current.avatarUrl || "",
   };
 }
 
-// toSeed 把内存中的当前用户映射成首次落库时使用的初始化结构。
-function toSeed(current: UserProfile): UserProfileData {
+// toSeed 把内存中的当前用户映射成首次落库时写入 users 表的最小结构。
+function toSeed(current: UserProfile) {
   return {
     id: current.id,
     nickname: current.nickname || current.username || "旅行者",
-    avatarLocalUri: "",
-    avatarRemoteUrl: current.avatarUrl || "",
-    deletedAt: null,
   };
 }
 
@@ -57,7 +59,7 @@ export async function ensureCurrentUserProfileInDb() {
   const current = getCurrentUser();
   const existed = await getUserRowById(current.id);
   if (existed) {
-    return toData(existed);
+    return toData(existed, current);
   }
 
   // seed 是首次落库时使用的默认资料快照。
@@ -68,13 +70,20 @@ export async function ensureCurrentUserProfileInDb() {
     created = await collection.create((row) => {
       assignModelId(row, seed.id);
       row.nickname = seed.nickname;
-      row.avatarLocalUri = seed.avatarLocalUri;
-      row.avatarRemoteUrl = seed.avatarRemoteUrl;
-      row.deletedAt = null;
     });
   });
 
-  return created ? toData(created) : seed;
+  if (created) {
+    return toData(created, current);
+  }
+
+  return {
+    id: seed.id,
+    nickname: seed.nickname,
+    avatarLocalUri: "",
+    avatarRemoteUrl: current.avatarUrl || "",
+    avatarDisplayUri: current.avatarUrl || "",
+  };
 }
 
 // getCurrentUserProfileFromDb 始终返回 mock 当前用户在本地库里的最新资料。
@@ -84,7 +93,7 @@ export async function getCurrentUserProfileFromDb() {
   if (!row) {
     return ensureCurrentUserProfileInDb();
   }
-  return toData(row);
+  return toData(row, current);
 }
 
 // updateCurrentUserNicknameInDb 持久化新昵称，并同步映射到 mock 空间数据里。
@@ -105,7 +114,6 @@ export async function updateCurrentUserNicknameInDb(nickname: string) {
   await database.write(async () => {
     await row.update((item) => {
       item.nickname = clean;
-      item.deletedAt = null;
     });
   });
 
@@ -119,26 +127,15 @@ export async function updateCurrentUserAvatarInDb(
   avatarRemoteUrl?: string,
 ) {
   const current = getCurrentUser();
-  const row = await getUserRowById(current.id);
-  if (!row) {
-    await ensureCurrentUserProfileInDb();
-    return updateCurrentUserAvatarInDb(avatarLocalUri, avatarRemoteUrl);
-  }
-
-  await database.write(async () => {
-    await row.update((item) => {
-      item.avatarLocalUri = avatarLocalUri;
-      if (avatarRemoteUrl !== undefined) {
-        item.avatarRemoteUrl = avatarRemoteUrl;
-      }
-      item.deletedAt = null;
-    });
-  });
+  await ensureCurrentUserProfileInDb();
+  const nextAvatarLocalUri = await saveProfileAvatarAsset(
+    current.id,
+    avatarLocalUri,
+  );
 
   updateCurrentUserProfile({
-    avatarLocalUri,
-    avatarRemoteUrl:
-      avatarRemoteUrl ?? (avatarLocalUri ? row.avatarRemoteUrl || "" : ""),
+    avatarLocalUri: nextAvatarLocalUri,
+    avatarRemoteUrl: avatarRemoteUrl ?? current.avatarUrl ?? "",
   });
   return getCurrentUserProfileFromDb();
 }

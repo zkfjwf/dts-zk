@@ -1,3 +1,4 @@
+//记账页面
 import { Q } from "@nozbe/watermelondb";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -16,8 +17,12 @@ import { database } from "@/model";
 import Expense from "@/model/Expense";
 import { createUlid } from "@/lib/ids";
 import { assignModelId, dateToTimestamp } from "@/lib/watermelon";
-import { syncMockSpaceToDatabase } from "./dbSync";
-import { getCurrentUser, getSpaceByCode, type SpaceData } from "./mockApp";
+import { syncMockSpaceToDatabase } from "@/features/travel/dbSync";
+import {
+  getCurrentUser,
+  getSpaceByCode,
+  type SpaceData,
+} from "@/features/travel/mockApp";
 
 // LedgerExpense 是账单页渲染用的轻量视图模型，金额已经提前换算成“元”。
 type LedgerExpense = {
@@ -42,6 +47,23 @@ function formatDate(ts: number) {
     minute: "2-digit",
   });
 }
+
+const ledgerPalette = {
+  background: "#F4FBF6",
+  surface: "rgba(255,255,255,0.78)",
+  panel: "#FFFFFF",
+  panelSoft: "#F7FCF9",
+  border: "#DDEDE3",
+  borderStrong: "#C8DDCF",
+  text: "#1E2438",
+  muted: "#6F7897",
+  softText: "#9AA4C0",
+  primary: "#60C28E",
+  secondary: "#3E9E6C",
+  success: "#34D399",
+  pink: "#A8E1C0",
+  shadow: "#BFDCCC",
+};
 
 // BookkeepingPage 负责记录账单，并从 WatermelonDB 读回历史数据。
 export default function BookkeepingPage() {
@@ -68,15 +90,13 @@ export default function BookkeepingPage() {
       .fetch();
 
     setDbExpenses(
-      records
-        .filter((item) => !item.deletedAt)
-        .map((item) => ({
-          id: item.id,
-          amountYuan: item.amount / 100,
-          description: item.description,
-          payerId: item.payerId || "",
-          createdAt: dateToTimestamp(item.createdAt),
-        })),
+      records.map((item) => ({
+        id: item.id,
+        amountYuan: item.amount / 100,
+        description: item.description,
+        payerId: item.payerId || "",
+        createdAt: dateToTimestamp(item.createdAt),
+      })),
     );
   }, []);
 
@@ -132,13 +152,6 @@ export default function BookkeepingPage() {
     [memberUsers],
   );
 
-  // summary 汇总总支出和人均支出，供顶部统计卡片展示。
-  const summary = useMemo(() => {
-    const total = allExpenses.reduce((acc, item) => acc + item.amountYuan, 0);
-    const avg = memberUsers.length ? total / memberUsers.length : 0;
-    return { total, avg };
-  }, [allExpenses, memberUsers.length]);
-
   // onAddBill 负责校验表单，并以“分”为单位保存新账单。
   const onAddBill = async () => {
     if (!space) {
@@ -166,7 +179,6 @@ export default function BookkeepingPage() {
         expense.payerId = currentUser.id;
         expense.amount = amountInCent;
         expense.description = cleanTitle;
-        expense.deletedAt = null;
       });
     });
 
@@ -208,9 +220,9 @@ export default function BookkeepingPage() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={styles.title}>旅行记账</Text>
+            <Text style={styles.title}>空间记账</Text>
             <Text style={styles.subtitle}>
-              把每一笔旅途中消费都整理成轻盈好读的账单。
+              把每一笔空间消费都整理成轻盈好读的账单。
             </Text>
           </View>
           <Pressable
@@ -221,57 +233,6 @@ export default function BookkeepingPage() {
           >
             <Text style={styles.backButtonText}>返回</Text>
           </Pressable>
-        </View>
-
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeader}>
-            <SoftIconBadge name="wallet-outline" tone="peach" size={54} />
-            <View style={styles.summaryHeaderTextWrap}>
-              <Text style={styles.summaryTitle}>旅途总览</Text>
-              <Text style={styles.summarySubtitle}>
-                {space.name} · {memberUsers.length} 人同行
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.summaryGrid}>
-            <View style={styles.summaryItem}>
-              <SoftIconBadge
-                name="logo-yen"
-                tone="sky"
-                size={46}
-                iconSize={20}
-              />
-              <Text style={styles.summaryLabel}>总金额</Text>
-              <Text style={styles.summaryValue}>
-                {formatAmount(summary.total)}
-              </Text>
-            </View>
-            <View style={styles.summaryItem}>
-              <SoftIconBadge
-                name="people-outline"
-                tone="mint"
-                size={46}
-                iconSize={20}
-              />
-              <Text style={styles.summaryLabel}>人均分摊</Text>
-              <Text style={styles.summaryValue}>
-                {formatAmount(summary.avg)}
-              </Text>
-            </View>
-            <View style={styles.summaryItem}>
-              <SoftIconBadge
-                name="card-outline"
-                tone="violet"
-                size={46}
-                iconSize={20}
-              />
-              <Text style={styles.summaryLabel}>默认付款人</Text>
-              <Text style={styles.summaryValueSmall}>
-                {currentUser.username}
-              </Text>
-            </View>
-          </View>
         </View>
 
         <View style={styles.editorCard}>
@@ -294,7 +255,7 @@ export default function BookkeepingPage() {
             value={title}
             onChangeText={setTitle}
             placeholder="例如：午餐、门票、打车"
-            placeholderTextColor="#97A9BC"
+            placeholderTextColor={ledgerPalette.softText}
             style={styles.input}
           />
           <TextInput
@@ -302,7 +263,7 @@ export default function BookkeepingPage() {
             onChangeText={setAmount}
             placeholder="金额"
             keyboardType="decimal-pad"
-            placeholderTextColor="#97A9BC"
+            placeholderTextColor={ledgerPalette.softText}
             style={styles.input}
           />
 
@@ -338,7 +299,7 @@ export default function BookkeepingPage() {
           {allExpenses.length === 0 ? (
             <View style={styles.emptyListCard}>
               <Text style={styles.emptyListText}>
-                还没有账单，先记下第一笔旅行消费吧。
+                还没有账单，先记下第一笔空间消费吧。
               </Text>
             </View>
           ) : (
@@ -366,7 +327,7 @@ export default function BookkeepingPage() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#F4F7FB" },
+  safeArea: { flex: 1, backgroundColor: ledgerPalette.background },
   scrollContent: {
     paddingHorizontal: 18,
     paddingTop: 20,
@@ -380,42 +341,44 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   title: {
-    color: "#1D2C40",
+    color: ledgerPalette.text,
     fontSize: 30,
     fontWeight: "800",
   },
   subtitle: {
     marginTop: 10,
-    color: "#6E8198",
+    color: ledgerPalette.muted,
     fontSize: 14,
     lineHeight: 22,
     maxWidth: 260,
   },
   backButton: {
     borderRadius: 999,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(255,255,255,0.84)",
     borderWidth: 1,
-    borderColor: "#E5ECF6",
+    borderColor: ledgerPalette.border,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    shadowColor: "#CDD8E7",
+    shadowColor: ledgerPalette.shadow,
     shadowOpacity: 0.14,
-    shadowRadius: 16,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 3,
   },
   backButtonText: {
-    color: "#2E4463",
+    color: ledgerPalette.primary,
     fontSize: 14,
     fontWeight: "700",
   },
   summaryCard: {
     borderRadius: 28,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: ledgerPalette.surface,
     padding: 20,
-    shadowColor: "#C5D3E2",
-    shadowOpacity: 0.14,
-    shadowRadius: 22,
+    borderWidth: 1,
+    borderColor: ledgerPalette.border,
+    shadowColor: ledgerPalette.shadow,
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
     elevation: 5,
   },
@@ -426,13 +389,13 @@ const styles = StyleSheet.create({
   },
   summaryHeaderTextWrap: { flex: 1 },
   summaryTitle: {
-    color: "#203044",
+    color: ledgerPalette.text,
     fontSize: 18,
     fontWeight: "800",
   },
   summarySubtitle: {
     marginTop: 4,
-    color: "#7588A0",
+    color: ledgerPalette.muted,
     fontSize: 13,
   },
   summaryGrid: {
@@ -441,38 +404,45 @@ const styles = StyleSheet.create({
   },
   summaryItem: {
     borderRadius: 22,
-    backgroundColor: "#F8FBFF",
+    backgroundColor: "rgba(255,255,255,0.92)",
     paddingHorizontal: 14,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: "#EEF2F8",
+    borderColor: ledgerPalette.border,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    shadowOffset: { width: -4, height: -4 },
+    elevation: 2,
   },
   summaryLabel: {
     flex: 1,
-    color: "#6B7E96",
+    color: ledgerPalette.muted,
     fontSize: 13,
     fontWeight: "600",
   },
   summaryValue: {
-    color: "#22364E",
+    color: ledgerPalette.text,
     fontSize: 16,
     fontWeight: "800",
   },
   summaryValueSmall: {
-    color: "#22364E",
+    color: ledgerPalette.text,
     fontSize: 15,
     fontWeight: "700",
   },
   editorCard: {
     borderRadius: 28,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: ledgerPalette.surface,
     padding: 20,
-    shadowColor: "#C5D3E2",
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
+    borderWidth: 1,
+    borderColor: ledgerPalette.border,
+    shadowColor: ledgerPalette.shadow,
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
     elevation: 4,
   },
@@ -483,13 +453,13 @@ const styles = StyleSheet.create({
   },
   sectionHeaderTextWrap: { flex: 1 },
   sectionTitle: {
-    color: "#203044",
+    color: ledgerPalette.text,
     fontSize: 18,
     fontWeight: "800",
   },
   sectionSubtitle: {
     marginTop: 4,
-    color: "#7387A0",
+    color: ledgerPalette.muted,
     fontSize: 13,
     lineHeight: 20,
   },
@@ -498,11 +468,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: "#F8FBFF",
+    backgroundColor: ledgerPalette.panelSoft,
     borderWidth: 1,
-    borderColor: "#E6EDF7",
-    color: "#24364D",
+    borderColor: ledgerPalette.borderStrong,
+    color: ledgerPalette.text,
     fontSize: 15,
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    shadowOffset: { width: -3, height: -3 },
   },
   buttonRow: {
     marginTop: 18,
@@ -512,13 +486,13 @@ const styles = StyleSheet.create({
   primaryButton: {
     flex: 1,
     borderRadius: 22,
-    backgroundColor: "#4D7CFE",
+    backgroundColor: ledgerPalette.primary,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 14,
-    shadowColor: "#4D7CFE",
+    shadowColor: ledgerPalette.primary,
     shadowOpacity: 0.24,
-    shadowRadius: 20,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 12 },
     elevation: 4,
   },
@@ -530,25 +504,27 @@ const styles = StyleSheet.create({
   secondaryButton: {
     flex: 1,
     borderRadius: 22,
-    backgroundColor: "#F7FAFF",
+    backgroundColor: "rgba(255,255,255,0.84)",
     borderWidth: 1,
-    borderColor: "#E4EBF5",
+    borderColor: ledgerPalette.borderStrong,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 14,
   },
   secondaryButtonText: {
-    color: "#2A3E57",
+    color: ledgerPalette.text,
     fontSize: 15,
     fontWeight: "700",
   },
   listCard: {
     borderRadius: 28,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: ledgerPalette.surface,
     padding: 20,
-    shadowColor: "#C5D3E2",
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
+    borderWidth: 1,
+    borderColor: ledgerPalette.border,
+    shadowColor: ledgerPalette.shadow,
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
     shadowOffset: { width: 0, height: 12 },
     elevation: 4,
   },
@@ -557,23 +533,27 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 18,
-    backgroundColor: "#F8FBFF",
+    backgroundColor: ledgerPalette.panelSoft,
     borderWidth: 1,
-    borderColor: "#EEF2F8",
+    borderColor: ledgerPalette.border,
   },
   emptyListText: {
-    color: "#7588A0",
+    color: ledgerPalette.muted,
     fontSize: 14,
     lineHeight: 20,
   },
   listItem: {
     marginTop: 16,
     borderRadius: 22,
-    backgroundColor: "#F9FBFF",
+    backgroundColor: "rgba(255,255,255,0.96)",
     paddingHorizontal: 16,
     paddingVertical: 15,
     borderWidth: 1,
-    borderColor: "#EEF2F8",
+    borderColor: ledgerPalette.border,
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    shadowOffset: { width: -3, height: -3 },
   },
   listItemTop: {
     flexDirection: "row",
@@ -583,23 +563,23 @@ const styles = StyleSheet.create({
   },
   listTitle: {
     flex: 1,
-    color: "#203146",
+    color: ledgerPalette.text,
     fontSize: 15,
     fontWeight: "700",
   },
   listAmount: {
-    color: "#4D7CFE",
+    color: ledgerPalette.primary,
     fontSize: 15,
     fontWeight: "800",
   },
   listMeta: {
     marginTop: 8,
-    color: "#6C8098",
+    color: ledgerPalette.muted,
     fontSize: 13,
   },
   listTime: {
     marginTop: 4,
-    color: "#94A4B8",
+    color: ledgerPalette.softText,
     fontSize: 12,
   },
   emptyContainer: {
@@ -610,7 +590,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   emptyTitle: {
-    color: "#1D2B42",
+    color: ledgerPalette.text,
     fontWeight: "800",
     fontSize: 24,
   },

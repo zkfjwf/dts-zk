@@ -44,7 +44,6 @@ export default function DatabaseTestScreen() {
         expense.payerId = payerId;
         expense.amount = Math.floor(Math.random() * 5000) + 1000;
         expense.description = `${description}（离线测试）`;
-        expense.deletedAt = null;
       });
     });
   };

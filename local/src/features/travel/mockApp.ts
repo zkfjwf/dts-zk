@@ -1,8 +1,27 @@
 import { createUlid, isUlid, nowTimestamp } from "@/lib/ids";
+// 该模块存放旅行空间相关的前端 mock 业务逻辑。
 
 // normalizeCode 统一规范邀请码大小写，避免 mock 存储里出现大小写不一致的问题。
 function normalizeCode(code: string) {
   return code.trim().toUpperCase();
+}
+
+// countDisplayChars 按字符而不是字节统计长度，避免中文名称被误判。
+function countDisplayChars(text: string) {
+  return Array.from(text).length;
+}
+
+// clampSpaceName 统一裁剪空间名称，保证不会超过十个字符。
+function clampSpaceName(text: string) {
+  return Array.from(text.trim()).slice(0, 10).join("");
+}
+
+// buildDefaultSpaceName 生成新的默认空间名，格式固定为“XX的空间”。
+function buildDefaultSpaceName(ownerName: string) {
+  const cleanOwnerName = Array.from(ownerName.trim() || "你")
+    .slice(0, 4)
+    .join("");
+  return `${cleanOwnerName}的空间`;
 }
 
 // cloneSpace 返回一份纯数据拷贝，避免页面直接改动内存里的 mock 源数据。
@@ -125,6 +144,7 @@ export type ExpenseRow = {
 
 export type CommentRow = {
   id: string;
+  space_id: string;
   content: string;
   commenter_id: string;
   post_id: string;
@@ -136,6 +156,7 @@ export type CommentRow = {
 
 export type PostRow = {
   id: string;
+  space_id: string;
   poster_id: string;
   created_at: number;
   updated_at: number;
@@ -174,6 +195,7 @@ export type JoinedSpaceSummary = {
   id: string;
   code: string;
   name: string;
+  createdAt: number;
   memberCount: number;
   photoCount: number;
   updatedAt: number;
@@ -287,6 +309,7 @@ function createPhoto(
 
 // createComment 生成一条挂在动态上的评论记录。
 function createComment(
+  spaceId: string,
   postId: string,
   commenterId: string,
   content: string,
@@ -294,6 +317,7 @@ function createComment(
 ): CommentRow {
   return {
     id: createId(),
+    space_id: spaceId,
     content,
     commenter_id: commenterId,
     post_id: postId,
@@ -425,7 +449,7 @@ export function createSpaceForCurrentUser() {
   // spaceRow 对应 docs/data-design.md 中 `spaces` 表的一条主记录。
   const spaceRow: SpaceRow = {
     id: spaceId,
-    name: "春日旅行空间",
+    name: buildDefaultSpaceName(CURRENT_USER.nickname || CURRENT_USER.username),
     created_at: createdAt,
     updated_at: createdAt,
   };
@@ -459,7 +483,8 @@ export function createSpaceForCurrentUser() {
   ];
 
   // 第一条动态模拟刚刚发布的旅行照片，并配两张图方便验证多图布局。
-  const firstPostCreatedAt = createdAt;
+  // 让示例动态发生在当前时刻之前，避免大厅里出现“未来时间”。
+  const firstPostCreatedAt = createdAt - 12 * 60 * 1000;
   const firstPostId = createId();
   const firstCaption = randomText();
   const firstPhotoA = createPhoto(
@@ -493,6 +518,7 @@ export function createSpaceForCurrentUser() {
   const posts: PostRow[] = [
     {
       id: firstPostId,
+      space_id: spaceId,
       poster_id: MEMBER_IDS.xiaoli,
       created_at: firstPostCreatedAt,
       updated_at: firstPostCreatedAt,
@@ -500,6 +526,7 @@ export function createSpaceForCurrentUser() {
     },
     {
       id: secondPostId,
+      space_id: spaceId,
       poster_id: MEMBER_IDS.ajun,
       created_at: secondPostCreatedAt,
       updated_at: secondPostCreatedAt,
@@ -510,18 +537,21 @@ export function createSpaceForCurrentUser() {
   // comments 既包含动态正文，也包含成员后续回复。
   const comments: CommentRow[] = [
     createComment(
+      spaceId,
       firstPostId,
       MEMBER_IDS.xiaoli,
       firstCaption,
       firstPostCreatedAt,
     ),
     createComment(
+      spaceId,
       firstPostId,
       MEMBER_IDS.ajun,
       "这个景色太棒了！",
-      firstPostCreatedAt + 10 * 60 * 1000,
+      firstPostCreatedAt + 4 * 60 * 1000,
     ),
     createComment(
+      spaceId,
       secondPostId,
       MEMBER_IDS.ajun,
       secondCaption,
@@ -612,7 +642,7 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
     return { ok: false, message: "请输入空间口令。" };
   }
   if (!isUlid(code)) {
-    return { ok: false, message: "空间口令必须是 26 位 ULID。" };
+    return { ok: false, message: "空间口令必须是 26 位 ID号。" };
   }
 
   const space = spaces.get(code);
@@ -700,7 +730,7 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
 export function leaveSpaceByCode(inputCode: string): LeaveResult {
   const code = normalizeCode(inputCode);
   if (!isUlid(code)) {
-    return { ok: false, message: "空间口令必须是 26 位 ULID。" };
+    return { ok: false, message: "空间口令必须是 26 位 ID号。" };
   }
 
   const space = spaces.get(code);
@@ -736,6 +766,33 @@ export function getSpaceByCode(inputCode: string) {
   return space ? cloneSpace(space) : null;
 }
 
+// renameSpaceByCode 允许前端在不改数据库结构的前提下更新空间名称。
+export function renameSpaceByCode(inputCode: string, nextName: string) {
+  const code = normalizeCode(inputCode);
+  const cleanName = clampSpaceName(nextName);
+  if (!isUlid(code)) {
+    return { ok: false as const, message: "空间口令格式不正确。" };
+  }
+  if (!cleanName) {
+    return { ok: false as const, message: "请输入空间名称。" };
+  }
+  if (countDisplayChars(nextName.trim()) > 10) {
+    return { ok: false as const, message: "空间名称最多 10 个字。" };
+  }
+
+  const space = spaces.get(code);
+  if (!space) {
+    return { ok: false as const, message: "没有找到当前空间。" };
+  }
+
+  const renamedAt = nowTimestamp();
+  space.name = cleanName;
+  space.space.name = cleanName;
+  space.space.updated_at = renamedAt;
+
+  return { ok: true as const, space: cloneSpace(space) };
+}
+
 // listJoinedSpacesForCurrentUser 返回当前用户仍然属于其中的所有旅行空间摘要。
 export function listJoinedSpacesForCurrentUser(): JoinedSpaceSummary[] {
   return Array.from(spaces.values())
@@ -748,6 +805,7 @@ export function listJoinedSpacesForCurrentUser(): JoinedSpaceSummary[] {
       id: space.id,
       code: space.code,
       name: space.name,
+      createdAt: space.space.created_at,
       memberCount: activeMemberCount(space),
       photoCount: space.photos.filter((item) => !item.deleted_at).length,
       updatedAt: Math.max(
@@ -793,6 +851,7 @@ export function addPostToSpace(
 
   space.posts.unshift({
     id: postId,
+    space_id: space.id,
     poster_id: CURRENT_USER.id,
     created_at: createdAt,
     updated_at: createdAt,
@@ -802,7 +861,7 @@ export function addPostToSpace(
 
   if (cleanText) {
     space.comments.unshift(
-      createComment(postId, CURRENT_USER.id, cleanText, createdAt),
+      createComment(space.id, postId, CURRENT_USER.id, cleanText, createdAt),
     );
   }
 
@@ -835,7 +894,7 @@ export function addCommentToPost(
   const commentedAt = nowTimestamp();
   // 同时更新父动态的 updated_at，保证最新评论会推动动态排序。
   space.comments.push(
-    createComment(postId, CURRENT_USER.id, content, commentedAt),
+    createComment(space.id, postId, CURRENT_USER.id, content, commentedAt),
   );
   post.updated_at = commentedAt;
 

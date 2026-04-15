@@ -1,9 +1,13 @@
 import { Model } from "@nozbe/watermelondb";
-import { date, field, readonly, text } from "@nozbe/watermelondb/decorators";
+import { date, readonly, text } from "@nozbe/watermelondb/decorators";
 
 // Comment 对应本地 `comments` 表中的一条动态评论记录。
 export default class Comment extends Model {
   static table = "comments";
+
+  // spaceId 标记评论属于哪个旅行空间，便于按空间同步与查询。
+  // @ts-ignore
+  @text("space_id") spaceId;
 
   // content 保存评论正文内容。
   // @ts-ignore
@@ -28,8 +32,4 @@ export default class Comment extends Model {
   // updatedAt 记录这条本地数据最近一次变更时间。
   // @ts-ignore
   @readonly @date("updated_at") updatedAt;
-
-  // deletedAt 用于软删除标记，方便后续同步时识别删除状态。
-  // @ts-ignore
-  @field("deleted_at") deletedAt;
 }

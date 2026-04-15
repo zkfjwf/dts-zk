@@ -3,18 +3,15 @@ import { appSchema, tableSchema } from "@nozbe/watermelondb";
 // schema 定义了 docs/data-design.md 中约定的本地离线数据表结构。
 export default appSchema({
   // version 要与 migrations 的最新版本保持一致。
-  version: 5,
+  version: 6,
   tables: [
     tableSchema({
-      // users 持久化保存旅行者的昵称和头像来源。
+      // users 只保留文档要求的用户主键与昵称；头像改由前端本地文件管理。
       name: "users",
       columns: [
         { name: "nickname", type: "string" },
-        { name: "avatar_local_uri", type: "string", isOptional: true },
-        { name: "avatar_remote_url", type: "string", isOptional: true },
         { name: "created_at", type: "number" },
         { name: "updated_at", type: "number" },
-        { name: "deleted_at", type: "number", isOptional: true },
       ],
     }),
     tableSchema({
@@ -34,7 +31,6 @@ export default appSchema({
         { name: "user_id", type: "string", isIndexed: true },
         { name: "created_at", type: "number" },
         { name: "updated_at", type: "number" },
-        { name: "deleted_at", type: "number", isOptional: true },
       ],
     }),
     tableSchema({
@@ -47,11 +43,10 @@ export default appSchema({
         { name: "description", type: "string" },
         { name: "created_at", type: "number" },
         { name: "updated_at", type: "number" },
-        { name: "deleted_at", type: "number", isOptional: true },
       ],
     }),
     tableSchema({
-      // photos 把动态图片独立成表，便于多人协作增删。
+      // photos 保留本地图片路径，方便前端离线显示与后续上传远程地址。
       name: "photos",
       columns: [
         { name: "space_id", type: "string", isIndexed: true },
@@ -62,30 +57,28 @@ export default appSchema({
         { name: "shoted_at", type: "number" },
         { name: "created_at", type: "number" },
         { name: "updated_at", type: "number" },
-        { name: "deleted_at", type: "number", isOptional: true },
       ],
     }),
     tableSchema({
-      // posts 只保存动态主记录和发布者信息。
+      // posts 只保存动态主记录；作者信息由图片或首条评论推导。
       name: "posts",
       columns: [
-        { name: "poster_id", type: "string" },
+        { name: "space_id", type: "string", isIndexed: true },
         { name: "created_at", type: "number" },
         { name: "updated_at", type: "number" },
-        { name: "deleted_at", type: "number", isOptional: true },
       ],
     }),
     tableSchema({
       // comments 既承载动态正文，也承载后续评论。
       name: "comments",
       columns: [
+        { name: "space_id", type: "string", isIndexed: true },
         { name: "post_id", type: "string", isIndexed: true },
         { name: "content", type: "string" },
         { name: "commenter_id", type: "string" },
         { name: "commented_at", type: "number" },
         { name: "created_at", type: "number" },
         { name: "updated_at", type: "number" },
-        { name: "deleted_at", type: "number", isOptional: true },
       ],
     }),
   ],

@@ -1,5 +1,5 @@
 import { Model } from "@nozbe/watermelondb";
-import { date, field, readonly, text } from "@nozbe/watermelondb/decorators";
+import { date, readonly, text } from "@nozbe/watermelondb/decorators";
 
 // SpaceMember 对应用户和旅行空间之间的多对多关系记录。
 export default class SpaceMember extends Model {
@@ -20,8 +20,4 @@ export default class SpaceMember extends Model {
   // updatedAt 记录这条本地数据最近一次变更时间。
   // @ts-ignore
   @readonly @date("updated_at") updatedAt;
-
-  // deletedAt 用于软删除标记，方便后续同步时识别删除状态。
-  // @ts-ignore
-  @field("deleted_at") deletedAt;
 }

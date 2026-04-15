@@ -1,3 +1,4 @@
+//记账结算平摊页面
 import { Q } from "@nozbe/watermelondb";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -12,8 +13,8 @@ import {
 import { SoftIconBadge } from "@/components/SoftIconBadge";
 import { database } from "@/model";
 import Expense from "@/model/Expense";
-import { syncMockSpaceToDatabase } from "./dbSync";
-import { getSpaceByCode, type SpaceData } from "./mockApp";
+import { syncMockSpaceToDatabase } from "@/features/travel/dbSync";
+import { getSpaceByCode, type SpaceData } from "@/features/travel/mockApp";
 
 // LedgerExpense 是结算算法真正需要的最小账单信息。
 type LedgerExpense = {
@@ -26,6 +27,22 @@ type Settlement = {
   fromId: string;
   toId: string;
   amount: number;
+};
+
+const statPalette = {
+  background: "#F4FBF6",
+  surface: "rgba(255,255,255,0.78)",
+  panel: "#FFFFFF",
+  panelSoft: "#F7FCF9",
+  border: "#DDEDE3",
+  borderStrong: "#C8DDCF",
+  text: "#1E2438",
+  muted: "#6F7897",
+  softText: "#9AA4C0",
+  primary: "#60C28E",
+  secondary: "#3E9E6C",
+  success: "#34D399",
+  shadow: "#BFDCCC",
 };
 
 // calcSettlements 会把所有成员的收支差额压缩成尽量少的转账方案。
@@ -112,12 +129,10 @@ export default function SettlementPage() {
       .fetch();
 
     setDbExpenses(
-      records
-        .filter((item) => !item.deletedAt)
-        .map((item) => ({
-          amountYuan: item.amount / 100,
-          payerId: item.payerId || "",
-        })),
+      records.map((item) => ({
+        amountYuan: item.amount / 100,
+        payerId: item.payerId || "",
+      })),
     );
   }, []);
 
@@ -197,7 +212,7 @@ export default function SettlementPage() {
           <View>
             <Text style={styles.title}>平摊结算</Text>
             <Text style={styles.subtitle}>
-              用最少的转账次数完成这次旅程的费用结清。
+              用最少的转账次数完成当前空间的费用结清。
             </Text>
           </View>
           <Pressable
@@ -223,7 +238,7 @@ export default function SettlementPage() {
             <View style={styles.summaryHeaderTextWrap}>
               <Text style={styles.summaryTitle}>结算概览</Text>
               <Text style={styles.summarySubtitle}>
-                {space?.name || "旅行空间"} · {memberCount} 位成员
+                {space?.name || "共享空间"} · {memberCount} 位成员
               </Text>
             </View>
           </View>
@@ -251,7 +266,7 @@ export default function SettlementPage() {
             />
             <Text style={styles.emptyTitle}>当前无需转账</Text>
             <Text style={styles.emptyText}>
-              账目已经平衡，大家可以轻松继续旅程。
+              账目已经平衡，大家可以轻松继续协作。
             </Text>
           </View>
         ) : (
@@ -273,7 +288,7 @@ export default function SettlementPage() {
                     {userNameById.get(item.toId) || "成员"}
                   </Text>
                   <Text style={styles.subText}>
-                    建议当面确认或备注旅程结算。
+                    建议当面确认或备注本次空间结算。
                   </Text>
                 </View>
               </View>
@@ -287,7 +302,7 @@ export default function SettlementPage() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#F4F7FB" },
+  safeArea: { flex: 1, backgroundColor: statPalette.background },
   scrollContent: {
     paddingHorizontal: 18,
     paddingTop: 20,
@@ -301,42 +316,44 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   title: {
-    color: "#1D2C40",
+    color: statPalette.text,
     fontSize: 30,
     fontWeight: "800",
   },
   subtitle: {
     marginTop: 10,
-    color: "#6E8198",
+    color: statPalette.muted,
     fontSize: 14,
     lineHeight: 22,
     maxWidth: 250,
   },
   backButton: {
     borderRadius: 999,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(255,255,255,0.84)",
     borderWidth: 1,
-    borderColor: "#E5ECF6",
+    borderColor: statPalette.border,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    shadowColor: "#CDD8E7",
+    shadowColor: statPalette.shadow,
     shadowOpacity: 0.14,
-    shadowRadius: 16,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 3,
   },
   backButtonText: {
-    color: "#2E4463",
+    color: statPalette.primary,
     fontSize: 14,
     fontWeight: "700",
   },
   summaryCard: {
     borderRadius: 28,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: statPalette.surface,
     padding: 20,
-    shadowColor: "#C5D3E2",
-    shadowOpacity: 0.14,
-    shadowRadius: 22,
+    borderWidth: 1,
+    borderColor: statPalette.border,
+    shadowColor: statPalette.shadow,
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
     elevation: 5,
   },
@@ -347,13 +364,13 @@ const styles = StyleSheet.create({
   },
   summaryHeaderTextWrap: { flex: 1 },
   summaryTitle: {
-    color: "#203044",
+    color: statPalette.text,
     fontSize: 18,
     fontWeight: "800",
   },
   summarySubtitle: {
     marginTop: 4,
-    color: "#7588A0",
+    color: statPalette.muted,
     fontSize: 13,
   },
   summaryGrid: {
@@ -364,55 +381,63 @@ const styles = StyleSheet.create({
   summaryItem: {
     flex: 1,
     borderRadius: 22,
-    backgroundColor: "#F8FBFF",
+    backgroundColor: "rgba(255,255,255,0.92)",
     paddingHorizontal: 16,
     paddingVertical: 16,
     borderWidth: 1,
-    borderColor: "#EEF2F8",
+    borderColor: statPalette.border,
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    shadowOffset: { width: -3, height: -3 },
   },
   summaryLabel: {
-    color: "#6C8098",
+    color: statPalette.muted,
     fontSize: 13,
     fontWeight: "600",
   },
   summaryValue: {
     marginTop: 8,
-    color: "#22364E",
+    color: statPalette.text,
     fontSize: 20,
     fontWeight: "800",
   },
   emptyCard: {
     borderRadius: 28,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: statPalette.surface,
     paddingHorizontal: 22,
     paddingVertical: 30,
     alignItems: "center",
-    shadowColor: "#C5D3E2",
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
+    borderWidth: 1,
+    borderColor: statPalette.border,
+    shadowColor: statPalette.shadow,
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
     shadowOffset: { width: 0, height: 12 },
     elevation: 4,
   },
   emptyTitle: {
     marginTop: 16,
-    color: "#203146",
+    color: statPalette.text,
     fontSize: 22,
     fontWeight: "800",
   },
   emptyText: {
     marginTop: 8,
-    color: "#7488A0",
+    color: statPalette.muted,
     fontSize: 14,
     lineHeight: 22,
     textAlign: "center",
   },
   card: {
     borderRadius: 28,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: statPalette.surface,
     padding: 20,
-    shadowColor: "#C5D3E2",
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
+    borderWidth: 1,
+    borderColor: statPalette.border,
+    shadowColor: statPalette.shadow,
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
     shadowOffset: { width: 0, height: 12 },
     elevation: 4,
   },
@@ -425,20 +450,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   mainText: {
-    color: "#22364E",
+    color: statPalette.text,
     fontSize: 16,
     fontWeight: "800",
     lineHeight: 24,
   },
   subText: {
     marginTop: 6,
-    color: "#788AA0",
+    color: statPalette.muted,
     fontSize: 13,
     lineHeight: 20,
   },
   amountText: {
     marginTop: 18,
-    color: "#4D7CFE",
+    color: statPalette.primary,
     fontSize: 24,
     fontWeight: "800",
   },
