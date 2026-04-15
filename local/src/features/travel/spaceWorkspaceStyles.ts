@@ -1,5 +1,7 @@
+// spaceWorkspaceStyles 集中维护空间大厅的样式，方便整体换肤和统一视觉层级。
 import { StyleSheet } from "react-native";
 
+// palette 是空间大厅的基础色板，页面里的按钮、卡片和文本都从这里取色。
 const palette = {
   background: "#F5FBF7",
   surface: "#FFFFFF",
@@ -20,6 +22,7 @@ const palette = {
   shadow: "#163127",
 };
 
+// workspaceTheme 暴露给组件逻辑层使用的少量语义化颜色。
 export const workspaceTheme = {
   icon: palette.accent,
   iconMuted: palette.textSecondary,
@@ -28,6 +31,7 @@ export const workspaceTheme = {
   danger: palette.danger,
 };
 
+// styles 保存 SpaceWorkspaceScreen 使用的完整样式表。
 export const styles = StyleSheet.create({
   safeArea: {
     flex: 1,

@@ -1,4 +1,4 @@
-//记账结算平摊页面
+// 空间结算页：根据账单记录计算成员之间的最少转账方案。
 import { Q } from "@nozbe/watermelondb";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -109,12 +109,12 @@ function calcSettlements(
   return result;
 }
 
-// SettlementPage 用来展示当前旅程里谁该向谁转账结算。
+// SettlementPage 用来展示当前空间里谁该向谁转账结算。
 export default function SettlementPage() {
   const { code } = useLocalSearchParams<{ code?: string }>();
   const spaceCode = typeof code === "string" ? code : "";
 
-  // space 保存当前旅行空间快照，用来拿成员关系和用户昵称。
+  // space 保存当前空间快照，用来拿成员关系和用户昵称。
   const [space, setSpace] = useState<SpaceData | null>(() =>
     spaceCode ? getSpaceByCode(spaceCode) : null,
   );
@@ -163,9 +163,7 @@ export default function SettlementPage() {
       return [];
     }
 
-    const memberIds = space.spaceMembers
-      .filter((item) => !item.deleted_at)
-      .map((item) => item.user_id);
+    const memberIds = space.spaceMembers.map((item) => item.user_id);
     return calcSettlements(memberIds, dbExpenses);
   }, [space, dbExpenses]);
 
@@ -181,15 +179,9 @@ export default function SettlementPage() {
       return [];
     }
 
-    const memberIds = new Set(
-      space.spaceMembers
-        .filter((item) => !item.deleted_at)
-        .map((item) => item.user_id),
-    );
+    const memberIds = new Set(space.spaceMembers.map((item) => item.user_id));
 
-    return space.users.filter(
-      (user) => !user.deleted_at && memberIds.has(user.id),
-    );
+    return space.users.filter((user) => memberIds.has(user.id));
   }, [space]);
 
   const userNameById = useMemo(

@@ -1,30 +1,31 @@
+// imageStorage 统一处理图片在应用沙盒和系统相册之间的复制、下载与权限细节。
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 
-// Fallback extension when the source uri does not expose one.
+// 当源地址里看不出后缀时，默认按 jpg 处理。
 const DEFAULT_IMAGE_EXT = ".jpg";
 
-// Cache album permission so repeated saves feel faster.
+// 缓存相册权限，避免连续保存时反复弹权限检查带来卡顿。
 let albumPermissionGranted = false;
 
-// Check whether the incoming uri still points to a remote image.
+// isRemoteImageUri 用来判断传入图片是否仍然是网络地址。
 export function isRemoteImageUri(uri: string) {
   return /^https?:\/\//i.test(uri);
 }
 
-// Only file:// uris can be written to the system album directly.
+// 只有 file:// 开头的本地文件路径才能直接写进系统相册。
 function isDirectAlbumUri(uri: string) {
   return /^file:\/\//i.test(uri);
 }
 
-// Try to infer the file extension from the original uri.
+// 从原始地址里尽量推断文件后缀，便于保存时保留正确格式。
 function getFileExt(uri: string) {
   const cleanUri = uri.split("?")[0].split("#")[0];
   const match = cleanUri.match(/\.([a-zA-Z0-9]{2,8})$/);
   return match ? `.${match[1].toLowerCase()}` : DEFAULT_IMAGE_EXT;
 }
 
-// Make sure the target directory exists before writing files.
+// ensureDir 会在写文件前先保证目标目录已经存在。
 async function ensureDir(targetDir: string) {
   const dirInfo = await FileSystem.getInfoAsync(targetDir);
   if (!dirInfo.exists) {
@@ -32,7 +33,7 @@ async function ensureDir(targetDir: string) {
   }
 }
 
-// Build a stable absolute path under the app document directory.
+// getAppStoragePath 把相对路径拼成应用 documentDirectory 下的绝对路径。
 function getAppStoragePath(relativePath: string) {
   if (!FileSystem.documentDirectory) {
     return "";
@@ -43,7 +44,7 @@ function getAppStoragePath(relativePath: string) {
   return `${baseDir}${relativePath.replace(/^\/+/, "")}`;
 }
 
-// Ensure the parent directory of a target file already exists.
+// ensureParentDirForFile 会在写文件前补齐父目录。
 async function ensureParentDirForFile(targetPath: string) {
   const normalized = targetPath.replace(/\\/g, "/");
   const lastSlashIndex = normalized.lastIndexOf("/");
@@ -57,7 +58,7 @@ async function ensureParentDirForFile(targetPath: string) {
   await ensureDir(parentDir);
 }
 
-// Copy or download an image into a fixed path inside the app sandbox.
+// saveImageToAppRelativePath 会把图片写入应用沙盒中的固定相对路径。
 export async function saveImageToAppRelativePath(
   uri: string,
   relativePath: string,
@@ -92,7 +93,7 @@ export async function saveImageToAppRelativePath(
   }
 }
 
-// Copy or download the image into the app sandbox for later reuse.
+// saveImageToLocalDir 会为图片生成一个随机文件名并存入指定目录。
 export async function saveImageToLocalDir(uri: string, folderName: string) {
   if (!FileSystem.documentDirectory) {
     return uri;
@@ -104,7 +105,7 @@ export async function saveImageToLocalDir(uri: string, folderName: string) {
   return saveImageToAppRelativePath(uri, `${folderName}/${fileName}`);
 }
 
-// Handle media-library permission details in one place.
+// ensureAlbumPermission 统一处理系统相册权限的读取和申请。
 async function ensureAlbumPermission() {
   if (albumPermissionGranted) {
     return;
@@ -127,7 +128,7 @@ async function ensureAlbumPermission() {
   albumPermissionGranted = true;
 }
 
-// Save the image into the system album with as little extra copying as possible.
+// saveImageToAlbum 会尽量少复制一次文件，再把图片写入系统相册。
 export async function saveImageToAlbum(uri: string, folderName: string) {
   await ensureAlbumPermission();
 

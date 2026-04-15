@@ -1,3 +1,4 @@
+// SpaceWorkspaceScreen 是空间大厅的核心容器，串起侧栏、动态流、发布弹层和空间菜单。
 import { Ionicons } from "@expo/vector-icons";
 import { Q } from "@nozbe/watermelondb";
 import { router, useFocusEffect } from "expo-router";
@@ -68,6 +69,8 @@ import {
 } from "@/features/travel/userDb";
 import { styles, workspaceTheme } from "@/features/travel/spaceWorkspaceStyles";
 
+// ImagePickerModule / ClipboardModule 用懒加载方式描述原生模块接口，
+// 这样在 Jest 或缺少原生依赖的环境里也不会因为静态 import 直接报错。
 type ImagePickerModule = {
   launchImageLibraryAsync: (options: Record<string, unknown>) => Promise<{
     canceled: boolean;
@@ -79,6 +82,8 @@ type ClipboardModule = {
   setStringAsync: (value: string) => Promise<boolean>;
 };
 
+// FeedComment / FeedPostImage / FeedPost 是大厅动态流真正使用的轻量视图模型。
+// 这里会把数据库原始记录和页面需要的展示字段重新整理成更好用的结构。
 type FeedComment = {
   id: string;
   commenterId: string;
@@ -129,10 +134,12 @@ function normalizeSpaceCode(code?: string) {
   return typeof code === "string" ? code.trim().toUpperCase() : "";
 }
 
+// clampSpaceNameInput 在输入阶段先按字符数限制空间名称，避免弹窗里超长。
 function clampSpaceNameInput(value: string) {
   return Array.from(value).slice(0, 10).join("");
 }
 
+// formatFeedTime 把动态时间统一格式化成短时间文案。
 function formatFeedTime(ts: number) {
   return new Date(ts).toLocaleString("zh-CN", {
     month: "2-digit",
@@ -142,6 +149,7 @@ function formatFeedTime(ts: number) {
   });
 }
 
+// resolveRenderablePhotoUri 优先读取本地图片；如果文件丢失，再回退到远程地址。
 async function resolveRenderablePhotoUri(localUri: string, remoteUrl: string) {
   const cleanLocalUri = localUri.trim();
   if (cleanLocalUri) {
@@ -158,6 +166,7 @@ async function resolveRenderablePhotoUri(localUri: string, remoteUrl: string) {
   return remoteUrl.trim();
 }
 
+// getImagePickerModule / getClipboardModule 会按需加载原生模块，并把结果缓存起来。
 function getImagePickerModule() {
   if (imagePickerModuleCache !== undefined) {
     return imagePickerModuleCache;
@@ -188,6 +197,7 @@ function getFallbackName(name: string) {
   return name.trim().slice(-1) || "空";
 }
 
+// UserAvatar 统一处理大厅里的头像渲染和兜底首字显示。
 function UserAvatar({ uri, name, size = 40, textSize = 16 }: UserAvatarProps) {
   const [failed, setFailed] = useState(false);
   const fallback = getFallbackName(name);
@@ -239,6 +249,7 @@ function FeedImage({ uri }: { uri: string }) {
   );
 }
 
+// CenterDialog 是大厅里复用的居中弹窗壳子，创建空间、加入空间、分享空间都走这里。
 function CenterDialog({
   visible,
   title,
@@ -296,6 +307,7 @@ export function SpaceWorkspaceScreen({
   const sidebarHiddenOffset = sidebarWidth + sidebarDockWidth + 36;
   const shouldAutoCloseSidebar = width < 720;
 
+  // 这一组状态负责驱动大厅的核心视图：当前空间、动态列表、侧栏和弹层。
   const [hydrating, setHydrating] = useState(true);
   const [activeSpaceCode, setActiveSpaceCode] = useState(normalizedInitialCode);
   const [currentSpace, setCurrentSpace] = useState<SpaceData | null>(null);
@@ -327,6 +339,7 @@ export function SpaceWorkspaceScreen({
   const [createdSpaceCode, setCreatedSpaceCode] = useState("");
   const [shareCodeVisible, setShareCodeVisible] = useState(false);
 
+  // 这一组 ref 主要给动画、滚动阈值和评论输入焦点管理使用。
   const sidebarProgress = useRef(new Animated.Value(0)).current;
   const scrollY = useRef(new Animated.Value(0)).current;
   const activeSpaceCodeRef = useRef(normalizedInitialCode);
@@ -357,6 +370,7 @@ export function SpaceWorkspaceScreen({
     }).start();
   }, [sidebarProgress, sidebarVisible]);
 
+  // loadDbPosts 会把 posts / photos / comments 三张表重新拼装成大厅动态流。
   const loadDbPosts = useCallback(async (spaceId: string) => {
     const postCollection = database.collections.get<Post>("posts");
     const photoCollection = database.collections.get<Photo>("photos");
@@ -445,6 +459,7 @@ export function SpaceWorkspaceScreen({
     );
   }, []);
 
+  // loadSpaceSnapshot 负责切换空间时同步 mock、数据库和最近使用空间记忆。
   const loadSpaceSnapshot = useCallback(
     async (spaceCode: string) => {
       const nextSpace = spaceCode ? getSpaceByCode(spaceCode) : null;
@@ -549,9 +564,6 @@ export function SpaceWorkspaceScreen({
   const users = useMemo(() => {
     const map = new Map<string, { nickname: string; avatarUrl: string }>();
     for (const user of currentSpace?.users ?? []) {
-      if (user.deleted_at) {
-        continue;
-      }
       map.set(user.id, {
         nickname: user.nickname,
         avatarUrl: user.avatar_local_uri || user.avatar_remote_url || "",
@@ -579,16 +591,14 @@ export function SpaceWorkspaceScreen({
     if (!currentSpace) {
       return [];
     }
-    return currentSpace.spaceMembers
-      .filter((item) => !item.deleted_at)
-      .map((item) => {
-        const profile = users.get(item.user_id);
-        return {
-          id: item.user_id,
-          nickname: profile?.nickname || "成员",
-          avatarUrl: profile?.avatarUrl || "",
-        };
-      });
+    return currentSpace.spaceMembers.map((item) => {
+      const profile = users.get(item.user_id);
+      return {
+        id: item.user_id,
+        nickname: profile?.nickname || "成员",
+        avatarUrl: profile?.avatarUrl || "",
+      };
+    });
   }, [currentSpace, users]);
 
   const editingPost = useMemo(() => {

@@ -1,3 +1,4 @@
+// 个人资料页：负责昵称、头像的本地持久化，以及头像导出到系统相册。
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -50,6 +51,7 @@ const profilePalette = {
   shadowLight: "#FFFFFF",
 };
 
+// profilePalette 统一维护个人资料页的视觉配色和层级。
 // 懒加载选图模块，避免测试环境里缺少原生能力时报错。
 function getImagePickerModule() {
   if (imagePickerModuleCache !== undefined) {
@@ -89,6 +91,7 @@ function Avatar({ uri, name }: { uri: string; name: string }) {
   );
 }
 
+// ProfilePage 负责读取本地资料，并承接昵称、头像相关的编辑动作。
 export default function ProfilePage() {
   // current 是 mock 层里的当前用户，用来做本地资料缺失时的兜底展示。
   const current = useMemo(() => getCurrentUser(), []);

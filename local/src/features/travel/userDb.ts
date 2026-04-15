@@ -1,3 +1,4 @@
+// userDb 负责当前用户资料的本地持久化，并把昵称、头像同步回 mock 业务层。
 import { database } from "@/model";
 import User from "@/model/User";
 import { assignModelId } from "@/lib/watermelon";
@@ -8,6 +9,7 @@ import {
   type UserProfile,
 } from "@/features/travel/mockApp";
 
+// UserProfileData 是页面真正消费的资料结构，已经把数据库字段和头像文件整合好了。
 export type UserProfileData = {
   // id 与 mock/current user 的业务主键保持一致，便于跨层同步。
   id: string;

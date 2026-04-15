@@ -1,4 +1,4 @@
-//记账页面
+// 空间记账页：负责新增账单、查看历史账单，并跳转到结算页。
 import { Q } from "@nozbe/watermelondb";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -65,13 +65,14 @@ const ledgerPalette = {
   shadow: "#BFDCCC",
 };
 
+// ledgerPalette 统一维护记账页使用的颜色，便于后续整页换肤。
 // BookkeepingPage 负责记录账单，并从 WatermelonDB 读回历史数据。
 export default function BookkeepingPage() {
   const { code } = useLocalSearchParams<{ code?: string }>();
   const spaceCode = typeof code === "string" ? code : "";
 
   const currentUser = getCurrentUser();
-  // space 保存当前激活的旅行空间快照，来源于 mock 领域层。
+  // space 保存当前激活的空间快照，来源于 mock 领域层。
   const [space, setSpace] = useState<SpaceData | null>(() =>
     spaceCode ? getSpaceByCode(spaceCode) : null,
   );
@@ -132,15 +133,9 @@ export default function BookkeepingPage() {
       return [];
     }
 
-    const memberIds = new Set(
-      space.spaceMembers
-        .filter((item) => !item.deleted_at)
-        .map((item) => item.user_id),
-    );
+    const memberIds = new Set(space.spaceMembers.map((item) => item.user_id));
 
-    return space.users.filter(
-      (user) => !user.deleted_at && memberIds.has(user.id),
-    );
+    return space.users.filter((user) => memberIds.has(user.id));
   }, [space]);
 
   // userNameById 让账单列表能用 payerId 快速映射出昵称。
@@ -221,9 +216,6 @@ export default function BookkeepingPage() {
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>空间记账</Text>
-            <Text style={styles.subtitle}>
-              把每一笔空间消费都整理成轻盈好读的账单。
-            </Text>
           </View>
           <Pressable
             style={styles.backButton}

@@ -1,7 +1,9 @@
+// SoftIconBadge 是各个页面复用的小型图标徽章，主要用于分区标题和功能卡片。
 import { Ionicons } from "@expo/vector-icons";
 import { memo } from "react";
 import { StyleSheet, View } from "react-native";
 
+// TONES 约定不同徽章色调的底色、光斑和图标颜色。
 const TONES = {
   sky: {
     wash: "#ECFDF5",
@@ -50,7 +52,7 @@ type SoftIconBadgeProps = {
   iconSize?: number;
 };
 
-// SoftIconBadgeBase 渲染旅行界面里复用的柔和渐变图标徽章。
+// SoftIconBadgeBase 渲染空间界面里复用的柔和渐变图标徽章。
 function SoftIconBadgeBase({
   name,
   tone = "sky",

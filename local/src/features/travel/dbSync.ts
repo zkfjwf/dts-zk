@@ -1,3 +1,4 @@
+// dbSync 负责把 mock 聚合快照摊平并同步进 WatermelonDB，供页面按表查询。
 import { database } from "@/model";
 import Comment from "@/model/Comment";
 import Expense from "@/model/Expense";
@@ -9,7 +10,8 @@ import User from "@/model/User";
 import { assignModelId, assignTimestamps } from "@/lib/watermelon";
 import type { SpaceData } from "@/features/travel/mockApp";
 
-// resolveExistingRecord 优先读取当前活跃记录；如果同 id 的记录已在本地被软删除，则交给调用方决定是否跳过重建。
+// resolveExistingRecord 优先读取当前活跃记录。
+// 如果同 id 的记录已在本地被软删除，则交给调用方决定是否跳过重建。
 async function resolveExistingRecord<T>(
   collection: { find: (id: string) => Promise<any> },
   recordMap: Map<string, T>,
@@ -80,14 +82,6 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
         user.id,
       );
 
-      if (user.deleted_at) {
-        if (existing) {
-          await existing.markAsDeleted();
-          userMap.delete(user.id);
-        }
-        continue;
-      }
-
       if (deleted) {
         continue;
       }
@@ -128,20 +122,15 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
       spaceMap.set(created.id, created);
     }
 
+    const activeSpaceMemberIds = new Set(
+      space.spaceMembers.map((item) => item.id),
+    );
     for (const member of space.spaceMembers) {
       const { record: existing, deleted } = await resolveExistingRecord(
         spaceMemberCollection,
         spaceMemberMap,
         member.id,
       );
-
-      if (member.deleted_at) {
-        if (existing) {
-          await existing.markAsDeleted();
-          spaceMemberMap.delete(member.id);
-        }
-        continue;
-      }
 
       if (deleted) {
         continue;
@@ -163,6 +152,17 @@ export async function syncMockSpaceToDatabase(space: SpaceData) {
         assignTimestamps(row, member.created_at, member.updated_at);
       });
       spaceMemberMap.set(created.id, created);
+    }
+
+    for (const [memberId, existingMember] of spaceMemberMap.entries()) {
+      if (existingMember.spaceId !== space.space.id) {
+        continue;
+      }
+      if (activeSpaceMemberIds.has(memberId)) {
+        continue;
+      }
+      await existingMember.markAsDeleted();
+      spaceMemberMap.delete(memberId);
     }
 
     for (const expense of space.expenses) {

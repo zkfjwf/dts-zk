@@ -1,3 +1,4 @@
+// 位置共享页：在本地 WebView 中渲染百度地图，并展示当前空间成员的位置状态。
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -53,6 +54,7 @@ const mapPalette = {
   shadow: "#BFDCCC",
 };
 
+// mapPalette 集中维护位置页使用的玻璃拟态配色。
 // 从 Expo 公共环境变量里读取浏览器端百度地图密钥。
 function getBaiduAk() {
   return process.env.EXPO_PUBLIC_BAIDU_MAP_AK?.trim() ?? "";

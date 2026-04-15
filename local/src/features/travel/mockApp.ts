@@ -72,16 +72,12 @@ function createSpaceMemberId(spaceId: string, userId: string) {
 
 // getActiveMemberIds 只返回某个空间中尚未删除的成员 id。
 function getActiveMemberIds(space: SpaceData) {
-  return new Set(
-    space.spaceMembers
-      .filter((item) => !item.deleted_at)
-      .map((item) => item.user_id),
-  );
+  return new Set(space.spaceMembers.map((item) => item.user_id));
 }
 
 // activeMemberCount 用来判断空间是否需要在无人时自动移除。
 function activeMemberCount(space: SpaceData) {
-  return space.spaceMembers.filter((item) => !item.deleted_at).length;
+  return space.spaceMembers.length;
 }
 
 export type UserProfile = {
@@ -99,7 +95,6 @@ export type UserRow = {
   avatar_remote_url: string;
   created_at: number;
   updated_at: number;
-  deleted_at: number | null;
 };
 
 export type SpaceRow = {
@@ -115,7 +110,6 @@ export type SpaceMemberRow = {
   user_id: string;
   created_at: number;
   updated_at: number;
-  deleted_at: number | null;
 };
 
 export type PhotoRow = {
@@ -157,7 +151,6 @@ export type CommentRow = {
 export type PostRow = {
   id: string;
   space_id: string;
-  poster_id: string;
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
@@ -281,7 +274,6 @@ function createUserRow(
     ...avatarFields,
     created_at: createdAt,
     updated_at: createdAt,
-    deleted_at: null,
   };
 }
 
@@ -374,7 +366,6 @@ export function updateCurrentUserProfile(next: {
             avatar_local_uri: latestAvatarFields.avatar_local_uri,
             avatar_remote_url: latestAvatarFields.avatar_remote_url,
             updated_at: updatedAt,
-            deleted_at: null,
           }
         : user,
     );
@@ -408,12 +399,6 @@ export function updateCurrentUserProfile(next: {
       comment.commenter_id === CURRENT_USER.id
         ? { ...comment, updated_at: updatedAt }
         : comment,
-    );
-
-    space.posts = space.posts.map((post) =>
-      post.poster_id === CURRENT_USER.id
-        ? { ...post, updated_at: updatedAt }
-        : post,
     );
   }
 }
@@ -462,7 +447,6 @@ export function createSpaceForCurrentUser() {
       user_id: CURRENT_USER.id,
       created_at: createdAt,
       updated_at: createdAt,
-      deleted_at: null,
     },
     {
       id: createSpaceMemberId(spaceId, MEMBER_IDS.xiaoli),
@@ -470,7 +454,6 @@ export function createSpaceForCurrentUser() {
       user_id: MEMBER_IDS.xiaoli,
       created_at: createdAt,
       updated_at: createdAt,
-      deleted_at: null,
     },
     {
       id: createSpaceMemberId(spaceId, MEMBER_IDS.ajun),
@@ -478,7 +461,6 @@ export function createSpaceForCurrentUser() {
       user_id: MEMBER_IDS.ajun,
       created_at: createdAt,
       updated_at: createdAt,
-      deleted_at: null,
     },
   ];
 
@@ -519,7 +501,6 @@ export function createSpaceForCurrentUser() {
     {
       id: firstPostId,
       space_id: spaceId,
-      poster_id: MEMBER_IDS.xiaoli,
       created_at: firstPostCreatedAt,
       updated_at: firstPostCreatedAt,
       deleted_at: null,
@@ -527,7 +508,6 @@ export function createSpaceForCurrentUser() {
     {
       id: secondPostId,
       space_id: spaceId,
-      poster_id: MEMBER_IDS.ajun,
       created_at: secondPostCreatedAt,
       updated_at: secondPostCreatedAt,
       deleted_at: null,
@@ -657,7 +637,6 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
   );
 
   if (existingMember) {
-    existingMember.deleted_at = null;
     existingMember.updated_at = joinedAt;
   } else {
     space.spaceMembers.push({
@@ -666,7 +645,6 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
       user_id: CURRENT_USER.id,
       created_at: joinedAt,
       updated_at: joinedAt,
-      deleted_at: null,
     });
   }
 
@@ -678,7 +656,6 @@ export function joinSpaceByCode(inputCode: string): JoinResult {
     existingUser.avatar_local_uri = avatarFields.avatar_local_uri;
     existingUser.avatar_remote_url = avatarFields.avatar_remote_url;
     existingUser.updated_at = joinedAt;
-    existingUser.deleted_at = null;
   } else {
     space.users.push(
       createUserRow(
@@ -739,11 +716,10 @@ export function leaveSpaceByCode(inputCode: string): LeaveResult {
   }
 
   const leftAt = nowTimestamp();
-  space.spaceMembers = space.spaceMembers.map((item) =>
-    item.user_id === CURRENT_USER.id
-      ? { ...item, updated_at: leftAt, deleted_at: leftAt }
-      : item,
+  space.spaceMembers = space.spaceMembers.filter(
+    (item) => item.user_id !== CURRENT_USER.id,
   );
+  space.space.updated_at = leftAt;
   space.locations = space.locations.filter(
     (item) => item.user_id !== CURRENT_USER.id,
   );
@@ -797,9 +773,7 @@ export function renameSpaceByCode(inputCode: string, nextName: string) {
 export function listJoinedSpacesForCurrentUser(): JoinedSpaceSummary[] {
   return Array.from(spaces.values())
     .filter((space) =>
-      space.spaceMembers.some(
-        (item) => item.user_id === CURRENT_USER.id && !item.deleted_at,
-      ),
+      space.spaceMembers.some((item) => item.user_id === CURRENT_USER.id),
     )
     .map((space) => ({
       id: space.id,
@@ -852,7 +826,6 @@ export function addPostToSpace(
   space.posts.unshift({
     id: postId,
     space_id: space.id,
-    poster_id: CURRENT_USER.id,
     created_at: createdAt,
     updated_at: createdAt,
     deleted_at: null,
