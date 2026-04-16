@@ -266,7 +266,11 @@ async function uploadSinglePhoto(
   });
   const requestBody = new FormData();
   requestBody.append("photo_id", photo.id);
-  requestBody.append("file", localPhotoFile, localPhotoFile.name);
+  requestBody.append("file", {
+    uri: localPhotoFile.uri,
+    type: "image/jpeg",
+    name: localPhotoFile.name,
+  } as any);
 
   const response = await fetch(`${apiBaseUrl}/api/v1/photos`, {
     method: "POST",

@@ -1135,6 +1135,7 @@ export function SpaceWorkspaceScreen({
       await refreshWorkspace(currentSpace.id);
       Alert.alert("同步完成", "当前空间的本地数据已经完成一次同步。");
     } catch (error) {
+      console.log(error);
       Alert.alert(
         "同步失败",
         `${String(error)}\n\n请确认本地服务端已经启动，并且 EXPO_PUBLIC_API_URL 配置正确。`,

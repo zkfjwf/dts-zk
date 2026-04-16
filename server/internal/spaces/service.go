@@ -11,36 +11,15 @@ import (
 
 var ErrUserNotInSpace = errors.New("user is not a member of the specified space")
 
-// EnsureBinding ensures user, space, and space_member rows exist on the server.
-// If any record is missing, it is created with just the id. Existing records are left untouched.
-// Name and other fields will be filled in later by sync push.
+// EnsureBinding ensures user and space_member rows exist on the server.
+// Space records are NOT created here — they will be created/updated by sync push.
 func EnsureBinding(tx *gorm.DB, userID, spaceID string) error {
 	user := db.User{}
 	err := tx.Where("id = ?", userID).First(&user).Error
 	switch {
 	case err == nil:
-		// already exists, do nothing
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		user = db.User{
-			ID: userID,
-		}
-		if err := tx.Create(&user).Error; err != nil {
-			return err
-		}
-	default:
-		return err
-	}
-
-	space := db.Space{}
-	err = tx.Where("id = ?", spaceID).First(&space).Error
-	switch {
-	case err == nil:
-		// already exists, do nothing
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		space = db.Space{
-			ID: spaceID,
-		}
-		if err := tx.Create(&space).Error; err != nil {
+		if err := tx.Create(&db.User{ID: userID}).Error; err != nil {
 			return err
 		}
 	default:
@@ -54,12 +33,11 @@ func EnsureBinding(tx *gorm.DB, userID, spaceID string) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		member = db.SpaceMember{
+		return tx.Create(&db.SpaceMember{
 			ID:      memberID,
 			SpaceID: spaceID,
 			UserID:  userID,
-		}
-		return tx.Create(&member).Error
+		}).Error
 	default:
 		return err
 	}
