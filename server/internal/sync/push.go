@@ -357,8 +357,8 @@ func upsertPhoto(tx *gorm.DB, item SyncPhoto, mode PushMode, lastPulledAt int64)
 			"last_modified": ts,
 		}).Error
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		record.ServerCreatedAt = ts
-		record.LastModified = ts
+		record.ServerCreatedAt = lastPulledAt
+		record.LastModified = lastPulledAt
 		return tx.Create(&record).Error
 	default:
 		return err
@@ -399,8 +399,8 @@ func upsertExpense(tx *gorm.DB, item SyncExpense, mode PushMode, lastPulledAt in
 			"last_modified": ts,
 		}).Error
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		record.ServerCreatedAt = ts
-		record.LastModified = ts
+		record.ServerCreatedAt = lastPulledAt
+		record.LastModified = lastPulledAt
 		return tx.Create(&record).Error
 	default:
 		return err
@@ -435,8 +435,8 @@ func upsertPost(tx *gorm.DB, item SyncPost, mode PushMode, lastPulledAt int64) e
 			"last_modified": ts,
 		}).Error
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		record.ServerCreatedAt = ts
-		record.LastModified = ts
+		record.ServerCreatedAt = lastPulledAt
+		record.LastModified = lastPulledAt
 		return tx.Create(&record).Error
 	default:
 		return err
@@ -479,8 +479,8 @@ func upsertComment(tx *gorm.DB, item SyncComment, mode PushMode, lastPulledAt in
 			"last_modified": ts,
 		}).Error
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		record.ServerCreatedAt = ts
-		record.LastModified = ts
+		record.ServerCreatedAt = lastPulledAt
+		record.LastModified = lastPulledAt
 		return tx.Create(&record).Error
 	default:
 		return err

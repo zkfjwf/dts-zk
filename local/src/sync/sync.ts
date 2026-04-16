@@ -327,17 +327,21 @@ function createEmptyChanges(): SyncChanges {
  * - malformed or partial payloads should degrade to empty arrays instead of
  *   crashing inside `synchronize()`
  *
- * This function is intentionally structural, not business-aware. It only makes
- * sure that every table has `created`, `updated` and `deleted` arrays.
+ * All records are moved into `updated` so WatermelonDB performs upsert
+ * semantics (create if missing, overwrite if present). This avoids duplicate-ID
+ * errors when the server returns records that already exist locally.
  */
 function normalizeChanges(rawChanges?: RawSyncChanges): SyncChanges {
   const normalizedChanges = createEmptyChanges();
 
   for (const tableName of SYNC_TABLES) {
     const tableChanges = rawChanges?.[tableName];
+    const created = pickRecords(tableChanges?.created);
+    const updated = pickRecords(tableChanges?.updated);
+
     normalizedChanges[tableName] = {
-      created: pickRecords(tableChanges?.created),
-      updated: pickRecords(tableChanges?.updated),
+      created: [],
+      updated: [...created, ...updated],
       deleted: pickIds(tableChanges?.deleted),
     };
   }
