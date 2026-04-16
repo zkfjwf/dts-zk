@@ -4,6 +4,15 @@ import DatabaseTestScreen from "@/app/(tabs)/db";
 import { database } from "@/model";
 
 // 这里 mock 了数据库模块，让测试只验证界面连线和写入调用是否正确。
+
+// The screen imports the sync module, but these UI tests do not exercise the
+// real network/file-system sync path. Mocking it keeps the test focused on the
+// WatermelonDB demo screen behavior.
+jest.mock("@/sync/sync", () => ({
+  syncSpace: jest.fn(),
+}));
+
+// Mock the WatermelonDB database instance used by the demo screen.
 jest.mock("@/model", () => {
   const mockSubscribe = jest.fn((callback) => {
     callback([
@@ -40,7 +49,6 @@ jest.mock("@/model", () => {
   };
 });
 
-// DatabaseTestScreen 测试覆盖本地开发阶段使用的手动调试页。
 describe("DatabaseTestScreen", () => {
   it("renders db title and mock expense", () => {
     const { getByText } = render(<DatabaseTestScreen />);
@@ -50,18 +58,22 @@ describe("DatabaseTestScreen", () => {
     expect(getByText("离线测试：AA制午餐")).toBeTruthy();
   });
 
-  it("calls database.write when add button is pressed", async () => {
-    const { getByText } = render(<DatabaseTestScreen />);
-    fireEvent.press(getByText("新增一笔账单"));
+  it("calls database.write when the add button is pressed", async () => {
+    const { getAllByRole } = render(<DatabaseTestScreen />);
+    const addButton = getAllByRole("button")[0];
+
+    fireEvent.press(addButton);
 
     await waitFor(() => {
       expect(database.write).toHaveBeenCalled();
     });
   });
 
-  it("calls database.batch when clear button is pressed", async () => {
-    const { getByText } = render(<DatabaseTestScreen />);
-    fireEvent.press(getByText("清空全部记录"));
+  it("calls database.batch when the clear button is pressed", async () => {
+    const { getAllByRole } = render(<DatabaseTestScreen />);
+    const clearButton = getAllByRole("button")[1];
+
+    fireEvent.press(clearButton);
 
     await waitFor(() => {
       expect(database.write).toHaveBeenCalled();

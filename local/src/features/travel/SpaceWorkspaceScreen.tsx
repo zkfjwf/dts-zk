@@ -1128,9 +1128,10 @@ export function SpaceWorkspaceScreen({
       return;
     }
 
+    const profile = await ensureActiveProfile();
     setSyncingSpace(true);
     try {
-      await syncSpace(currentSpace.id);
+      await syncSpace({ userId: profile.id, spaceId: currentSpace.id });
       await refreshWorkspace(currentSpace.id);
       Alert.alert("同步完成", "当前空间的本地数据已经完成一次同步。");
     } catch (error) {
