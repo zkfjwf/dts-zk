@@ -4,6 +4,7 @@ import { synchronize } from "@nozbe/watermelondb/sync";
 import { database } from "@/model";
 import Photo from "@/model/Photo";
 import { META_TABLES, SYNC_TABLES, type SyncTableName } from "@/model/tables";
+import { bindSpaceOnServer } from "@/features/travel/spaceApi";
 import { buildHttpErrorMessage, getApiBaseUrl } from "@/sync/api";
 import type {
   PhotoUploadResponse,
@@ -64,6 +65,12 @@ export async function syncSpace(input: SyncContext): Promise<void> {
  */
 async function runSync(context: SyncContext): Promise<void> {
   const apiBaseUrl = getApiBaseUrl();
+
+  await bindSpaceOnServer({
+    userId: context.userId,
+    spaceId: context.spaceId,
+    name: "",
+  });
 
   await synchronize({
     database,
