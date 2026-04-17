@@ -2,7 +2,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Q } from "@nozbe/watermelondb";
 import { router, useFocusEffect } from "expo-router";
-import * as FileSystem from "expo-file-system/legacy";
 import {
   useCallback,
   useEffect,
@@ -36,11 +35,11 @@ import Comment from "@/model/Comment";
 import Photo from "@/model/Photo";
 import Post from "@/model/Post";
 import { createUlid, isUlid, nowTimestamp } from "@/lib/ids";
+import { isRemoteImageUri } from "@/lib/imageStorage";
 import {
-  isRemoteImageUri,
-  saveImageToAppRelativePath,
-  saveImageToAlbum,
-} from "@/lib/imageStorage";
+  resolveRenderablePhotoUri,
+  savePhotoToLocalStorage,
+} from "@/lib/photoAssets";
 import {
   clearLastSpaceCode,
   readLastSpaceCode,
@@ -183,23 +182,6 @@ function formatFeedTime(ts: number) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-// resolveRenderablePhotoUri 优先读取本地图片；如果文件丢失，再回退到远程地址。
-async function resolveRenderablePhotoUri(localUri: string, remoteUrl: string) {
-  const cleanLocalUri = localUri.trim();
-  if (cleanLocalUri) {
-    try {
-      const localInfo = await FileSystem.getInfoAsync(cleanLocalUri);
-      if (localInfo.exists) {
-        return cleanLocalUri;
-      }
-    } catch {
-      // 忽略本地文件探测异常，继续回退到远程地址。
-    }
-  }
-
-  return remoteUrl.trim();
 }
 
 // getImagePickerModule / getClipboardModule 会按需加载原生模块，并把结果缓存起来。
@@ -345,7 +327,6 @@ export function SpaceWorkspaceScreen({
   const [syncingSpace, setSyncingSpace] = useState(false);
   const [updatingPostId, setUpdatingPostId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<FeedPostImage | null>(null);
-  const [savingPreview, setSavingPreview] = useState(false);
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
   const [postText, setPostText] = useState("");
   const [selectedImageUris, setSelectedImageUris] = useState<string[]>([]);
@@ -475,15 +456,10 @@ export function SpaceWorkspaceScreen({
 
     const activePostIds = new Set(posts.map((item) => item.id));
     const photoMap = new Map<string, FeedPostImage[]>();
-    const resolvedPhotos = await Promise.all(
-      photos.map(async (item) => ({
-        item,
-        uri: await resolveRenderablePhotoUri(
-          item.localUri || "",
-          item.remoteUrl || "",
-        ),
-      })),
-    );
+    const resolvedPhotos = photos.map((item) => ({
+      item,
+      uri: resolveRenderablePhotoUri(item.id, item.remoteUrl || ""),
+    }));
     resolvedPhotos.forEach(({ item, uri }) => {
       if (!item.postId || !activePostIds.has(item.postId) || !uri) {
         return;
@@ -795,13 +771,12 @@ export function SpaceWorkspaceScreen({
       const preparedImages = await Promise.all(
         mergedInputUris.map(async (uri, index) => {
           const photoId = createUlid();
-          const localPath = await saveImageToAppRelativePath(
-            uri,
-            `photos/${photoId}.jpg`,
-          );
+          const localPath = await savePhotoToLocalStorage(photoId, uri);
+          if (!localPath) {
+            throw new Error(`图片 ${photoId} 未能保存到应用本地目录。`);
+          }
           return {
             id: photoId,
-            localUri: localPath,
             remoteUrl: isRemoteImageUri(uri) ? uri : "",
             shotedAt: createdAt + index,
           };
@@ -825,7 +800,6 @@ export function SpaceWorkspaceScreen({
             photo.spaceId = currentSpace.id;
             photo.postId = postId;
             photo.uploaderId = activeProfile.id;
-            photo.localUri = image.localUri;
             photo.remoteUrl = image.remoteUrl;
             photo.shotedAt = new Date(image.shotedAt);
             assignTimestamps(photo, image.shotedAt, image.shotedAt);
@@ -874,13 +848,12 @@ export function SpaceWorkspaceScreen({
       const preparedImages = await Promise.all(
         uris.map(async (uri, index) => {
           const photoId = createUlid();
-          const localPath = await saveImageToAppRelativePath(
-            uri,
-            `photos/${photoId}.jpg`,
-          );
+          const localPath = await savePhotoToLocalStorage(photoId, uri);
+          if (!localPath) {
+            throw new Error(`图片 ${photoId} 未能保存到应用本地目录。`);
+          }
           return {
             id: photoId,
-            localUri: localPath,
             remoteUrl: isRemoteImageUri(uri) ? uri : "",
             shotedAt: createdAt + index,
           };
@@ -895,7 +868,6 @@ export function SpaceWorkspaceScreen({
             photo.spaceId = currentSpace.id;
             photo.postId = postId;
             photo.uploaderId = activeProfile.id;
-            photo.localUri = image.localUri;
             photo.remoteUrl = image.remoteUrl;
             photo.shotedAt = new Date(image.shotedAt);
             assignTimestamps(photo, image.shotedAt, image.shotedAt);
@@ -982,21 +954,6 @@ export function SpaceWorkspaceScreen({
 
     setCommentInputs((prev) => ({ ...prev, [postId]: "" }));
     await loadDbPosts(currentSpace.id);
-  };
-
-  const onSavePreviewImage = async () => {
-    if (!previewImage) {
-      return;
-    }
-    setSavingPreview(true);
-    try {
-      await saveImageToAlbum(previewImage.uri, "travel-saved-images");
-      Alert.alert("保存成功", "图片已经保存到系统相册。");
-    } catch (error) {
-      Alert.alert("保存失败", String(error));
-    } finally {
-      setSavingPreview(false);
-    }
   };
 
   const onCreateSpace = async () => {
@@ -2291,17 +2248,6 @@ export function SpaceWorkspaceScreen({
               resizeMode="contain"
             />
           ) : null}
-          <View style={styles.previewActionRow}>
-            <Pressable
-              style={styles.previewSaveButton}
-              disabled={savingPreview}
-              onPress={() => void onSavePreviewImage()}
-            >
-              <Text style={styles.previewSaveButtonText}>
-                {savingPreview ? "保存中..." : "保存到系统相册"}
-              </Text>
-            </Pressable>
-          </View>
         </View>
       </Modal>
     </SafeAreaView>

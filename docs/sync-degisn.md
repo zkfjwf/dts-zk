@@ -57,8 +57,8 @@
     3. **全局 push 与按空间隔离**：WatermelonDB 生成的是**全局** `changes`，不会自动按 `space_id` 过滤；**当前阶段允许**直接全局 `POST`，服务端按记录自身字段与约束落库。真正的「按空间隔离」主要体现在 Pull：`GET /api/v1/sync?space_id=...` 只返回该空间相关的上述各表数据。后续如需可在 `pushChanges` 前按当前空间预过滤。
     4. 其他：`photo` 的 `remote_url` 可能为空；整体成功返回 `200` 与 `{ "ok": true }`，失败则事务回滚。
 6. 客户端 检查photos（检查所有记录，不要按照space_id筛选，因为可能有其他空间本地照片post失败的情况）：
-    - remote_url为空，说明是你添加的图片。你需要post该photo，服务器会把remote_url填入服务器的数据库，你下次sync则会得到该remote_url。
-    - 前端需处理photo表查到photo记录，但local_uri为空的异常情况
-    - 这意味着，事实上photo只有create和delete，不会有update
-    - 若 `remote_url` 非空，但 `local_uri` 为空，或 `local_uri` 指向的本地文件已不存在，说明这条photo元数据已经同步到了本地，但图片文件本身还没落到设备上。此时前端应在sync完成后，把图片下载到 `${App存储目录}/photos/${photo_id}.jpg`，并把 `local_uri` 回写为这个本地路径。
-    - 下载成功后，前端可以继续尝试把这张图片写入手机系统相册（**需要安装expo-media-library**），方便用户在相册里直接看到；如果相册权限被拒绝，或写入相册失败，不影响本次sync整体成功，至少要保证App沙盒内已有可显示、可离线使用的本地文件。
+    - `remote_url` 为空，且 `${App存储目录}/photos/${photo_id}.jpg` 存在：说明这是本地新建、尚未上传二进制的图片。前端需调用 `POST /api/v1/photos` 做上传补偿；服务端写入 `remote_url` 后，客户端下次 sync 会拉到它。
+    - `remote_url` 非空，且 `${App存储目录}/photos/${photo_id}.jpg` 不存在：说明 photo 元数据已经同步到本地，但图片文件本身还没落到设备上。前端应在 sync 完成后把图片下载到这个固定路径，供后续显示与离线访问。
+    - `remote_url` 非空，且 `${App存储目录}/photos/${photo_id}.jpg` 已存在：说明这条 photo 已经是完整状态，不需要额外处理。
+    - `remote_url` 为空，且 `${App存储目录}/photos/${photo_id}.jpg` 也不存在：说明这是异常记录。客户端无法自动恢复，应在 sync 中跳过且不影响整体成功；前端展示时不显示这张图片。
+    - 这意味着，事实上 photo 的同步补偿只围绕“上传缺失的二进制”和“下载缺失的二进制”展开，不存在单独的 photo update 文件同步逻辑。
